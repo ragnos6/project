@@ -1,0 +1,126 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <title>Доступные предприятия</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/bootstrap/5.3.0/css/bootstrap.min.css">
+</head>
+<body>
+<div class="container mt-5">
+    <h2>Список доступных предприятий</h2>
+
+    <!-- (1) Форма для изменения таймзон -->
+    <form method="post">
+        {% csrf_token %}
+        <table class="table table-striped">
+            <thead>
+                <tr>
+                    <th>#</th>
+                    <th>Название предприятия</th>
+                    <th>Город</th>
+                    <th>Текущий часовой пояс</th>
+                    <th>Изменить часовой пояс</th>
+                    <th>Управление авто</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for enterprise in enterprises %}
+                    <tr>
+                        <td>{{ forloop.counter }}</td>
+                        <td>{{ enterprise.name }}</td>
+                        <td>{{ enterprise.city }}</td>
+                        <td>{{ enterprise.timezone }}</td>
+                        <td>
+                            <select name="timezone_{{ enterprise.id }}" class="form-select">
+                                <option value="">Выберите таймзону</option>
+                                {% for tz in timezones %}
+                                    <option value="{{ tz }}" {% if enterprise.timezone == tz %}selected{% endif %}>
+                                        {{ tz }}
+                                    </option>
+                                {% endfor %}
+                            </select>
+                        </td>
+                        <td>
+                            <a href="{% url 'cars:manage_vehicles' enterprise.id %}" class="btn btn-primary btn-sm">
+                                Управление автомобилями
+                            </a>
+                        </td>
+                    </tr>
+                {% empty %}
+                    <tr>
+                        <td colspan="6" class="text-center">Нет доступных предприятий</td>
+                    </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+        <!-- Кнопка "Сохранить изменения" (изменение таймзон) -->
+        <button type="submit" class="btn btn-success">Сохранить изменения</button>
+    </form>
+    <!-- Форма изменения таймзон окончена -->
+
+    <hr>
+
+    <!-- (2) Форма для ЭКСПОРТА (GET), теперь enterprise_id выбирается из списка -->
+    <h3>Экспорт данных</h3>
+    <form method="get" action="{% url 'cars:export_data' %}" class="mb-4">
+        <div class="row g-3 align-items-end">
+            <!-- Выбор предприятия -->
+            <div class="col-auto">
+                <label for="enterprise_id_export" class="form-label">Предприятие:</label>
+                <select name="enterprise_id" id="enterprise_id_export" class="form-select form-select-sm" required>
+                    <option value="">Выберите предприятие</option>
+                    {% for ent in enterprises %}
+                        <option value="{{ ent.id }}">{{ ent.name }} (ID: {{ ent.id }})</option>
+                    {% endfor %}
+                </select>
+            </div>
+            
+            <!-- Даты начала и конца -->
+            <div class="col-auto">
+                <label for="start_date" class="form-label">Начало периода:</label>
+                <input type="date" name="start" id="start_date" class="form-control form-control-sm">
+            </div>
+            <div class="col-auto">
+                <label for="end_date" class="form-label">Конец периода:</label>
+                <input type="date" name="end" id="end_date" class="form-control form-control-sm">
+            </div>
+
+            <!-- Формат файла -->
+            <div class="col-auto">
+                <label for="file_format" class="form-label">Формат:</label>
+                <select name="file_format" id="file_format" class="form-select form-select-sm">
+                    <option value="json">JSON</option>
+                    <option value="csv">CSV (ZIP)</option>
+                </select>
+            </div>
+
+            <!-- Кнопка "Скачать" -->
+            <div class="col-auto">
+                <button type="submit" class="btn btn-info btn-sm">Скачать</button>
+            </div>
+        </div>
+    </form>
+
+    <!-- (3) Форма для ИМПОРТА (POST), тоже выбираем предприятие из списка -->
+    <h3>Импорт данных</h3>
+    <form method="post" action="{% url 'cars:import_data' %}" enctype="multipart/form-data">
+        {% csrf_token %}
+        <div class="row g-3 align-items-end">
+
+            <div class="col-auto">
+                <label for="file_import" class="form-label">Файл (JSON или ZIP):</label>
+                <input type="file" name="file_import" id="file_import"
+                       class="form-control form-control-sm" required>
+            </div>
+            <div class="col-auto">
+                <button type="submit" class="btn btn-warning btn-sm">Импорт</button>
+            </div>
+        </div>
+    </form>
+
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/bootstrap/5.3.0/js/bootstrap.bundle.min.js"></script>
+</body>
+</html>
+
+

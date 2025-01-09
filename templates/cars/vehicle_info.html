@@ -1,0 +1,224 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <title>Информация об автомобиле</title>
+    {% load django_bootstrap5 %}
+    {% bootstrap_css %}
+
+    <!-- Подключаем Leaflet CSS (без integrity) -->
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+
+    <style>
+        /* Фиксированный размер карты */
+        #map {
+            width: 100%;
+            height: 500px;
+            margin-top: 20px;
+        }
+    </style>
+</head>
+<body>
+<div class="container mt-4">
+    <h2 class="mb-3">Информация об автомобиле</h2>
+
+    <!-- Карточка с информацией об авто -->
+    <div class="card mb-4">
+        <div class="card-header bg-primary text-white">Общие сведения</div>
+        <div class="card-body">
+            <!-- Модель авто -->
+            <p><strong>Модель:</strong>
+                {% if vehicle.model %}
+                    {{ vehicle.model }}
+                {% else %}
+                    Не указано
+                {% endif %}
+            </p>
+
+            <!-- Цвет -->
+            <p><strong>Цвет:</strong> {{ vehicle.color }}</p>
+
+            <!-- Год выпуска -->
+            <p><strong>Год выпуска:</strong> {{ vehicle.year_of_production }}</p>
+
+            <!-- Пробег -->
+            <p><strong>Пробег (км):</strong> {{ vehicle.mileage }}</p>
+
+            <!-- Цена -->
+            <p><strong>Цена:</strong> {{ vehicle.cost }} ₽</p>
+
+            <!-- Коробка передач -->
+            <p><strong>Коробка передач:</strong>
+                {% if vehicle.transmission == 'manual' %}
+                    Механическая
+                {% elif vehicle.transmission == 'automatic' %}
+                    Автоматическая
+                {% else %}
+                    Неизвестно
+                {% endif %}
+            </p>
+
+            <!-- Тип топлива -->
+            <p><strong>Тип топлива:</strong>
+                {% if vehicle.fuel_type == 'gasoline' %}
+                    Бензин
+                {% elif vehicle.fuel_type == 'diesel' %}
+                    Дизель
+                {% elif vehicle.fuel_type == 'electric' %}
+                    Электро
+                {% elif vehicle.fuel_type == 'hybrid' %}
+                    Гибрид
+                {% else %}
+                    Неизвестно
+                {% endif %}
+            </p>
+
+            <!-- Предприятие -->
+            <p><strong>Принадлежит предприятию:</strong>
+                {% if vehicle.enterprise %}
+                    {{ vehicle.enterprise.name }}
+                {% else %}
+                    Не указано
+                {% endif %}
+            </p>
+
+            <!-- Активный водитель -->
+            <p><strong>Активный водитель:</strong>
+                {% if vehicle.active_driver %}
+                    {{ vehicle.active_driver.name }}
+                {% else %}
+                    Нет
+                {% endif %}
+            </p>
+
+            <!-- Все водители -->
+            <p><strong>Все водители:</strong>
+                {% if vehicle.drivers.count > 0 %}
+                    {% for d in vehicle.drivers.all %}
+                        {{ d.name }}{% if not forloop.last %}, {% endif %}
+                    {% endfor %}
+                {% else %}
+                    Нет назначенных водителей
+                {% endif %}
+            </p>
+
+            <!-- Документация (OneToOne) -->
+            <p><strong>Документация:</strong>
+                {% if vehicle.documentation %}
+                    {{ vehicle.documentation }}
+                {% else %}
+                    Нет
+                {% endif %}
+            </p>
+        </div>
+    </div>
+
+    <!-- Форма выбора дат -->
+    <div class="card mb-4">
+        <div class="card-header bg-secondary text-white">Фильтр поездок</div>
+        <div class="card-body">
+            <form method="GET" action="">
+                <div class="row g-3">
+                    <div class="col-md-6">
+                        <label for="id_start" class="form-label">Начало периода:</label>
+                        <input type="datetime-local" name="start" id="id_start" 
+                               class="form-control" required
+                               value="{{ start_value|default_if_none:'' }}">
+                    </div>
+                    <div class="col-md-6">
+                        <label for="id_end" class="form-label">Конец периода:</label>
+                        <input type="datetime-local" name="end" id="id_end"
+                               class="form-control" required
+                               value="{{ end_value|default_if_none:'' }}">
+                    </div>
+                    <div class="col-12 mt-3">
+                        <button type="submit" class="btn btn-success">Показать поездки</button>
+                    </div>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Если поездки найдены, показываем таблицу -->
+    {% if trip_list %}
+        <h4>Найдено {{ trip_list|length }} поездок</h4>
+        <table class="table table-bordered table-striped">
+            <thead>
+            <tr>
+                <th>Цвет</th>
+                <th>Начало</th>
+                <th>Окончание</th>
+                <th>Длительность</th>
+                <th>Адрес старта</th>
+                <th>Адрес окончания</th>
+            </tr>
+            </thead>
+            <tbody>
+            {% for t in trip_list %}
+                <tr>
+                    <!-- Цвет -->
+                    <td style="color: {{ t.color }};">
+                        {{ t.color|title }}
+                    </td>
+                    <td>{{ t.start_time_local }}</td>
+                    <td>{{ t.end_time_local }}</td>
+                    <td>{{ t.duration }}</td>
+                    <td>{% if t.start_address %} {{ t.start_address }}{% else %}-{% endif %}</td>
+                    <td>{% if t.end_address %} {{ t.end_address }}{% else %}-{% endif %}</td>
+                </tr>
+            {% endfor %}
+            </tbody>
+        </table>
+    {% else %}
+        <p>Поездки не найдены или не были запрошены.</p>
+    {% endif %}
+
+    <!-- Карта -->
+    <div id="map"></div>
+</div>
+
+<!-- Bootstrap JS -->
+{% bootstrap_javascript %}
+
+<!-- Подключаем Leaflet JS -->
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+
+<script>
+  // Инициализируем карту
+  const map = L.map('map').setView([55.751244, 37.618423], 10);
+
+  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+    maxZoom: 19,
+    attribution: '© OpenStreetMap'
+  }).addTo(map);
+
+  // Данные о поездках для отрисовки линий
+  const tripData = JSON.parse('{{ trip_data_json|default:"[]"|escapejs }}');
+
+  if (tripData.length > 0) {
+      tripData.forEach(item => {
+          const coords = item.coords;
+          const color = item.color || 'red'; // на всякий случай
+          if (coords && coords.length > 1) {
+              const polyline = L.polyline(coords, {
+                  color: color,
+                  weight: 5,
+                  opacity: 0.8
+              }).addTo(map);
+              // Попап с информацией
+              polyline.bindPopup(
+                  `Поездка #${item.trip_id}<br>` +
+                  `Начало: ${item.start_time}<br>` +
+                  `Окончание: ${item.end_time}<br>` +
+                  `<span style="color:${color}">(${color})</span>`
+              );
+              // Подогнать границы под маршрут
+              map.fitBounds(polyline.getBounds());
+          }
+      });
+  }
+</script>
+
+</body>
+</html>
+

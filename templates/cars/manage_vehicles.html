@@ -1,0 +1,137 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <title>Управление автомобилями</title>
+    {% load django_bootstrap5 %}
+    <!-- Bootstrap CSS -->
+    {% bootstrap_css %}
+</head>
+<body>
+<div class="container mt-5">
+    <h2>Управление автомобилями предприятия: {{ enterprise.name }}</h2>
+
+	<h3 class="mt-4">
+	  <!-- Кнопка для скрытого/раскрывающегося блока -->
+	  <button class="btn btn-primary" type="button" data-bs-toggle="collapse" data-bs-target="#addCarForm" aria-expanded="false" aria-controls="addCarForm">
+	    Добавить новый автомобиль
+	  </button>
+	</h3>
+
+	<!-- Скрытый по умолчанию блок с формой -->
+	<div class="collapse" id="addCarForm">
+	  <div class="row">
+	    <div class="col-md-6 col-lg-4">
+	      <form method="post" class="border p-4 rounded shadow-sm bg-light">
+		{% csrf_token %}
+		{% bootstrap_form vehicle_form %}
+		<button type="submit" class="btn btn-primary w-100 mt-3">Добавить</button>
+	      </form>
+	    </div>
+	  </div>
+	</div>
+
+    <h3 class="mt-4">Список автомобилей</h3>
+    <div class="table-responsive">
+        <table class="table table-striped table-hover">
+            <thead>
+                <tr>
+                    <th>#</th>
+                    <th>Модель</th>
+                    <th>Дата и время покупки</th>
+                    <th>Цвет</th>
+                    <th>Год выпуска</th>
+                    <th>Пробег</th>
+                    <th>Коробка передач</th>
+                    <th>Тип топлива</th>
+                    <th>Цена</th>
+                    <th>Активный водитель</th>
+                    <th>Действия</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for vehicle in page_obj %}
+                    <tr>
+                        <td>{{ forloop.counter0|add:page_obj.start_index }}</td>
+                        <td>
+                        <a href="{% url 'cars:vehicle_info' vehicle.id %}" class="btn btn-primary btn-sm">{{ vehicle.model }}</a>
+                        </td>
+                        <td class="purchase-date" data-utc="{{ vehicle.purchase_date.isoformat }}">{{ vehicle.local_purchase_date }}</td>
+                        <td>{{ vehicle.color }}</td>
+                        <td>{{ vehicle.year_of_production }}</td>
+                        <td>{{ vehicle.mileage }}</td>
+                        <td>{{ vehicle.get_transmission_display }}</td>
+                        <td>{{ vehicle.get_fuel_type_display }}</td>
+                        <td>{{ vehicle.cost }}</td>
+                        <td>
+                            {% if vehicle.active_driver %}
+                                {{ vehicle.active_driver.name }}
+                            {% else %}
+                                Нет водителя
+                            {% endif %}
+                        </td>
+                        <td>
+                            <a href="{% url 'cars:edit_vehicle' vehicle.id %}" class="btn btn-warning btn-sm">Редактировать</a>
+                            <a href="{% url 'cars:delete_vehicle' vehicle.id %}" class="btn btn-danger btn-sm">Удалить</a>
+                        </td>
+                    </tr>
+                {% empty %}
+                    <tr>
+                        <td colspan="10" class="text-center">Нет автомобилей в этом предприятии</td>
+                    </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+
+    <!-- Пагинация -->
+    {% if page_obj.paginator.num_pages > 1 %}
+        <nav>
+            <ul class="pagination justify-content-center">
+                {% if page_obj.has_previous %}
+                    <li class="page-item">
+                        <a class="page-link" href="?page={{ page_obj.previous_page_number }}">Предыдущая</a>
+                    </li>
+                {% endif %}
+                {% for num in page_obj.paginator.page_range %}
+                    {% if num >= page_obj.number|add:"-2" and num <= page_obj.number|add:"2" %}
+                        <li class="page-item {% if page_obj.number == num %}active{% endif %}">
+                            <a class="page-link" href="?page={{ num }}">{{ num }}</a>
+                        </li>
+                    {% endif %}
+                {% endfor %}
+                {% if page_obj.has_next %}
+                    <li class="page-item">
+                        <a class="page-link" href="?page={{ page_obj.next_page_number }}">Следующая</a>
+                    </li>
+                {% endif %}
+            </ul>
+        </nav>
+    {% endif %}
+</div>
+
+<!-- Bootstrap JS -->
+{% bootstrap_javascript %}
+<script>
+    document.addEventListener("DOMContentLoaded", function () {
+        const timeElements = document.querySelectorAll(".purchase-date");
+        timeElements.forEach(el => {
+            const utcDateStr = el.getAttribute("data-utc");
+            if (utcDateStr) {
+                const utcDate = new Date(utcDateStr); // Парсим дату в UTC
+                // Преобразуем дату в формате ДД.ММ.ГГГГ ЧЧ:ММ
+                const options = {
+                    day: '2-digit',
+                    month: '2-digit',
+                    year: 'numeric',
+                    hour: '2-digit',
+                    minute: '2-digit',
+                    hour12: false, // Использовать 24-часовой формат
+                };
+                const formattedDate = utcDate.toLocaleString('ru-RU', options); // Локаль 'ru-RU' для формата с точками
+                el.textContent = formattedDate; // Обновляем текст элемента
+            }
+        });
+    });
+</script>
+</body>
+</html>

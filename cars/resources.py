@@ -4,6 +4,8 @@ from geopy.exc import GeopyError
 from geopy.geocoders import Yandex
 from import_export import resources, fields
 from import_export.widgets import ManyToManyWidget
+from django.contrib.gis.geos import Point
+
 
 
 class EnterpriseResource(resources.ModelResource):

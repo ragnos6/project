@@ -5,6 +5,7 @@ from geopy.geocoders import Yandex
 from import_export import resources, fields
 from import_export.widgets import ManyToManyWidget
 from django.contrib.gis.geos import Point
+from .views import get_address_for_point
 
 
 
@@ -57,31 +58,6 @@ class VehicleResource(resources.ModelResource):
             'active_driver',
         )
         export_order = fields
-
-def get_address_for_point(point):
-    """
-    Получить адрес через Яндекс Геокодер (geopy).
-    point.x - долгота, point.y - широта
-    """
-    api_key = '38974648-aae9-4e6f-bdfb-9a64a05c5c91'
-
-    # Создаём объект для геокодирования
-    geolocator = Yandex(
-        api_key=api_key,
-        user_agent="cars",  # Можно указать любое название
-        timeout=5,            # Таймаут для HTTP-запроса
-    )
-
-    try:
-        # Для обратного геокодирования geopy ожидает координаты в формате (широта, долгота)
-        location = geolocator.reverse((point.y, point.x))
-
-        if location and location.address:
-            return location.address
-        else:
-            return "Адрес не найден"
-    except GeopyError as e:
-        return f"Ошибка при обращении к Яндекс Геокодеру: {str(e)}"
         
 class TripResource(resources.ModelResource):
     start_address = fields.Field()  # виртуальное поле

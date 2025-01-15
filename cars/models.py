@@ -346,3 +346,4 @@ class EnterpriseActiveCarsReport(Report):
             self.report_type = "EnterpriseActiveCarsReport"
         super().save(*args, **kwargs)
 
+

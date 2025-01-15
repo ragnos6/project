@@ -5,6 +5,7 @@ from zoneinfo import available_timezones, ZoneInfo
 from django.utils.timezone import now, get_default_timezone_name, localtime
 from django.contrib.gis.db import models as gis_models
 from django.contrib.postgres.indexes import GistIndex
+from django.contrib.postgres.fields import JSONField
 
 
 # Модель документации
@@ -245,11 +246,103 @@ class Trip(models.Model):
 
     def __str__(self):
         return f"Trip for {self.vehicle} from {self.start_time} to {self.end_time}"
-    
-    
-    
-    
-    
-    
-    
-    
+
+class Report(models.Model):
+    """
+    Базовая модель отчёта.
+    """
+    name = models.CharField("Название отчета", max_length=200)
+    start_date = models.DateField("Начальная дата")
+    end_date = models.DateField("Конечная дата")
+
+    PERIODS = [
+        ('day', 'Сутки'),
+        ('month', 'Месяц'),
+        ('year', 'Год'),
+    ]
+    period = models.CharField(
+        choices=PERIODS, 
+        max_length=5, 
+        default='day', 
+        verbose_name='Отчетный период'
+    )
+
+    result = models.JSONField("Результат", null=True, blank=True)
+    report_type = models.CharField(
+        "Тип отчёта", 
+        max_length=100, 
+        default="BaseReport"
+    )
+
+    created_at = models.DateTimeField("Дата создания", auto_now_add=True, null=True, blank=True)
+
+    def __str__(self):
+        return f"{self.name} [{self.report_type}] ({self.start_date} — {self.end_date})"
+
+    class Meta:
+        verbose_name = "Отчёт"
+        verbose_name_plural = "Отчёты"
+
+
+class CarMileageReport(Report):
+    """
+    Отчёт по пробегу одного автомобиля за период.
+    """
+    vehicle = models.ForeignKey(
+        'Vehicle', 
+        on_delete=models.CASCADE, 
+        null=True, 
+        blank=True
+    )
+
+    class Meta:
+        verbose_name = "Отчёт: Пробег ТС"
+        verbose_name_plural = "Отчёты: Пробег ТС"
+
+    def save(self, *args, **kwargs):
+        if not self.report_type:
+            self.report_type = "CarMileageReport"
+        super().save(*args, **kwargs)
+
+
+class DriverTimeReport(Report):
+    """
+    Отчёт по времени езды водителя за период.
+    """
+    driver = models.ForeignKey(
+        'Driver',
+        on_delete=models.CASCADE,
+        null=True,
+        blank=True
+    )
+
+    class Meta:
+        verbose_name = "Отчёт: Время езды водителя"
+        verbose_name_plural = "Отчёты: Время езды водителей"
+
+    def save(self, *args, **kwargs):
+        if not self.report_type:
+            self.report_type = "DriverTimeReport"
+        super().save(*args, **kwargs)
+
+
+class EnterpriseActiveCarsReport(Report):
+    """
+    Отчёт по автомобилям предприятия с активными водителями за период.
+    """
+    enterprise = models.ForeignKey(
+        'Enterprise',
+        on_delete=models.CASCADE,
+        null=True,
+        blank=True
+    )
+
+    class Meta:
+        verbose_name = "Отчёт: Активные авто предприятия"
+        verbose_name_plural = "Отчёты: Активные авто предприятий"
+
+    def save(self, *args, **kwargs):
+        if not self.report_type:
+            self.report_type = "EnterpriseActiveCarsReport"
+        super().save(*args, **kwargs)
+

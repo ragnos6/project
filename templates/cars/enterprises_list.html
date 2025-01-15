@@ -6,7 +6,15 @@
 </head>
 <body>
 <div class="container mt-5">
-    <h2>Список доступных предприятий</h2>
+
+    <!-- Шапка с заголовком и кнопкой «Отчёты» -->
+    <div class="d-flex justify-content-between align-items-center mb-3">
+        <h2 class="mb-0">Список доступных предприятий</h2>
+        <!-- Кнопка «Отчёты» → ведёт на новую страницу (reports_list) -->
+        <a href="{% url 'cars:reports_list' %}" class="btn btn-secondary">
+            Отчёты
+        </a>
+    </div>
 
     <!-- (1) Форма для изменения таймзон -->
     <form method="post">
@@ -105,14 +113,15 @@
     <form method="post" action="{% url 'cars:import_data' %}" enctype="multipart/form-data">
         {% csrf_token %}
         <div class="row g-3 align-items-end">
-
             <div class="col-auto">
                 <label for="file_import" class="form-label">Файл (JSON или ZIP):</label>
                 <input type="file" name="file_import" id="file_import"
                        class="form-control form-control-sm" required>
             </div>
             <div class="col-auto">
-                <button type="submit" class="btn btn-warning btn-sm">Импорт</button>
+                <button type="submit" class="btn btn-warning btn-sm">
+                    Импорт
+                </button>
             </div>
         </div>
     </form>

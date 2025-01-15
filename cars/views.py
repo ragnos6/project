@@ -3,9 +3,7 @@ import os
 import json
 import io
 import zipfile
-from geopy.geocoders import Yandex
-from geopy.exc import GeopyError
-from django.core.serializers import serialize
+from django.contrib import messages
 from django.shortcuts import render, get_object_or_404, redirect
 from django.contrib.auth.views import LoginView
 from django.core.paginator import Paginator
@@ -15,15 +13,17 @@ from django.urls import reverse_lazy
 from rest_framework import viewsets, status
 from rest_framework.views import APIView
 from .permissions import IsManagerOrReadOnly
-from .forms import ManagerLoginForm, VehicleForm
-from .models import Vehicle, Enterprise, Driver, TrackPoint, Trip
+from .forms import ManagerLoginForm, VehicleForm, ReportForm
+from .models import Vehicle, Enterprise, Driver, TrackPoint, Trip, Report
 from .serializers import VehicleSerializer, EnterpriseSerializer, DriverSerializer, CustomAuthTokenSerializer, \
     TrackPointSerializer
 from .resources import EnterpriseResource, VehicleResource, TripResource
 from .pagination import CustomVehiclePagination
+from .utils import get_address_for_point, generate_car_mileage_report, generate_driver_time_report, generate_enterprise_active_cars_report
 from rest_framework.response import Response
 from rest_framework.authtoken.views import ObtainAuthToken
 from rest_framework.authtoken.models import Token
+from rest_framework.decorators import api_view
 from rest_framework.exceptions import PermissionDenied, ValidationError, NotFound
 from django.views.decorators.csrf import csrf_protect
 from django.views.generic import ListView, TemplateView
@@ -32,13 +32,11 @@ from django.contrib.auth import authenticate
 from django.contrib.auth.decorators import login_required
 from django.urls import reverse
 from django.utils import timezone
-from django.utils.timezone import localtime, now
 from zoneinfo import ZoneInfo
 from datetime import datetime, timedelta
 from django.db.models import Q
 from django.views.generic import DetailView
-from import_export import resources
-from tablib import Databook, Dataset
+from tablib import Databook
 
 
 class EnterpriseViewSet(viewsets.ModelViewSet):
@@ -339,32 +337,7 @@ class TripAPI(APIView):
         serializer = TrackPointSerializer(track_points, many=True)
         return Response(serializer.data, status=status.HTTP_200_OK)
         
-        
-def get_address_for_point(point):
-    """
-    Получить адрес через Яндекс Геокодер (geopy).
-    point.x - долгота, point.y - широта
-    """
-    api_key = '38974648-aae9-4e6f-bdfb-9a64a05c5c91'
-
-    # Создаём объект для геокодирования
-    geolocator = Yandex(
-        api_key=api_key,
-        user_agent="cars",  # Можно указать любое название
-        timeout=5,            # Таймаут для HTTP-запроса
-    )
-
-    try:
-        # Для обратного геокодирования geopy ожидает координаты в формате (широта, долгота)
-        location = geolocator.reverse((point.y, point.x))
-
-        if location and location.address:
-            return location.address
-        else:
-            return "Адрес не найден"
-    except GeopyError as e:
-        return f"Ошибка при обращении к Яндекс Геокодеру: {str(e)}"
-
+       
 class TripSummaryAPI(APIView):
     def get(self, request, vehicle_id):
         # 1. Извлекаем параметры, считаем, что они в локальном времени предприятия
@@ -760,4 +733,101 @@ def _import_csv_zip(file):
 
     return HttpResponse("Импорт CSV (ZIP) завершён")
 
+
+@api_view(['GET'])
+def report_api(request):
+    """
+    Пример: GET /cars/report-api/?report_type=car_mileage&vehicle_id=44&start=2024-12-01&end=2025-01-13&period=month
+    """
+    report_type = request.GET.get('report_type')
+    period = request.GET.get('period', 'day')
+    start_str = request.GET.get('start')
+    end_str = request.GET.get('end')
+
+    try:
+        start_date = datetime.strptime(start_str, '%Y-%m-%d').date()
+        end_date = datetime.strptime(end_str, '%Y-%m-%d').date()
+    except (ValueError, TypeError):
+        return Response({"error": "Неверный формат дат"}, status=status.HTTP_400_BAD_REQUEST)
+
+    if report_type == 'car_mileage':
+        vehicle_id = request.GET.get('vehicle_id')
+        if not vehicle_id:
+            return Response({"error": "Не указан vehicle_id"}, status=status.HTTP_400_BAD_REQUEST)
+        try:
+            report = generate_car_mileage_report(vehicle_id, start_date, end_date, period)
+            return Response(report.result, status=status.HTTP_200_OK)
+        except Vehicle.DoesNotExist:
+            return Response({"error": "Транспортное средство не найдено"}, status=status.HTTP_404_NOT_FOUND)
+
+    elif report_type == 'driver_time':
+        driver_id = request.GET.get('driver_id')
+        if not driver_id:
+            return Response({"error": "Не указан driver_id"}, status=status.HTTP_400_BAD_REQUEST)
+        try:
+            report = generate_driver_time_report(driver_id, start_date, end_date, period)
+            return Response(report.result, status=status.HTTP_200_OK)
+        except Driver.DoesNotExist:
+            return Response({"error": "Водитель не найден"}, status=status.HTTP_404_NOT_FOUND)
+
+    elif report_type == 'enterprise_active_cars':
+        enterprise_id = request.GET.get('enterprise_id')
+        if not enterprise_id:
+            return Response({"error": "Не указан enterprise_id"}, status=status.HTTP_400_BAD_REQUEST)
+        try:
+            report = generate_enterprise_active_cars_report(enterprise_id, start_date, end_date, period)
+            return Response(report.result, status=status.HTTP_200_OK)
+        except Enterprise.DoesNotExist:
+            return Response({"error": "Предприятие не найдено"}, status=status.HTTP_404_NOT_FOUND)
+
+    else:
+        return Response({"error": "Неизвестный тип отчёта"}, status=status.HTTP_400_BAD_REQUEST)
+
+
+def reports_list(request):
+    if request.method == 'POST':
+        form = ReportForm(request.POST)
+        if form.is_valid():
+            report_type = form.cleaned_data['report_type']
+            period = form.cleaned_data['period']
+            start_date = form.cleaned_data['start_date']
+            end_date = form.cleaned_data['end_date']
+
+            try:
+                if report_type == 'car_mileage':
+                    vehicle = form.cleaned_data['vehicle']
+                    report = generate_car_mileage_report(vehicle.id, start_date, end_date, period)
+                elif report_type == 'driver_time':
+                    driver = form.cleaned_data['driver']
+                    report = generate_driver_time_report(driver.id, start_date, end_date, period)
+                elif report_type == 'enterprise_active_cars':
+                    enterprise = form.cleaned_data['enterprise']
+                    report = generate_enterprise_active_cars_report(enterprise.id, start_date, end_date, period)
+                else:
+                    messages.error(request, "Неизвестный тип отчёта.")
+                    return redirect('cars:reports_list')
+
+                messages.success(request, f"Отчёт '{report.name}' успешно создан.")
+                return redirect('cars:reports_list')
+
+            except Exception as e:
+                messages.error(request, f"Ошибка при создании отчёта: {str(e)}")
+        else:
+            messages.error(request, "Пожалуйста, исправьте ошибки в форме.")
+    else:
+        form = ReportForm()
+
+    reports = Report.objects.all()
+
+    context = {
+        'form': form,
+        'reports': reports,
+    }
+
+    return render(request, 'cars/reports_list.html', context)
+    
+    
+def view_report(request, report_id):
+    report = get_object_or_404(Report, id=report_id)
+    return JsonResponse(report.result, safe=False)
 

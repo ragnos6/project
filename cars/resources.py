@@ -1,11 +1,9 @@
 from import_export import resources
 from .models import Enterprise, Vehicle, Trip, TrackPoint, Driver
-from geopy.exc import GeopyError
-from geopy.geocoders import Yandex
 from import_export import resources, fields
 from import_export.widgets import ManyToManyWidget
 from django.contrib.gis.geos import Point
-from .views import get_address_for_point
+from .utils import get_address_for_point
 
 
 

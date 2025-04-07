@@ -57,4 +57,24 @@ class ReportForm(forms.Form):
 
         if report_type == 'enterprise_active_cars' and not cleaned_data.get('enterprise'):
             self.add_error('enterprise', 'Это поле обязательно для выбранного типа отчёта.')
+            
+class TripUploadForm(forms.Form):
+    # Форма для загрузки поездки
+    start_time = forms.DateTimeField(
+        widget=forms.DateTimeInput(attrs={'type': 'datetime-local'}),
+        label="Начало поездки"
+    )
+    end_time = forms.DateTimeField(
+        widget=forms.DateTimeInput(attrs={'type': 'datetime-local'}),
+        label="Окончание поездки"
+    )
+    gpx_file = forms.FileField(label="GPX файл")
+
+    def clean(self):
+        cleaned_data = super().clean()
+        start = cleaned_data.get('start_time')
+        end = cleaned_data.get('end_time')
+        if start and end and start >= end:
+            raise forms.ValidationError("Время начала должно быть раньше времени окончания.")
+        return cleaned_data
 

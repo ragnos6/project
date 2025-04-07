@@ -237,6 +237,8 @@ class Trip(models.Model):
     start_time = models.DateTimeField()
     end_time = models.DateTimeField()
     duration = models.DurationField(null=True, blank=True)  # Поле для хранения интервала
+    gpx_file = models.FileField(upload_to='gpx_tracks/', null=True, blank=True)
+
 
     def save(self, *args, **kwargs):
         # Вычисление интервала между start_time и end_time перед сохранением

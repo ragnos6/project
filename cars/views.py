@@ -13,7 +13,7 @@ from django.urls import reverse_lazy
 from rest_framework import viewsets, status
 from rest_framework.views import APIView
 from .permissions import IsManagerOrReadOnly
-from .forms import ManagerLoginForm, VehicleForm, ReportForm
+from .forms import ManagerLoginForm, VehicleForm, ReportForm, TripUploadForm
 from .models import Vehicle, Enterprise, Driver, TrackPoint, Trip, Report
 from .serializers import VehicleSerializer, EnterpriseSerializer, DriverSerializer, CustomAuthTokenSerializer, \
     TrackPointSerializer
@@ -741,8 +741,8 @@ def report_api(request):
     """
     report_type = request.GET.get('report_type')
     period = request.GET.get('period', 'day')
-    start_str = request.GET.get('start')
-    end_str = request.GET.get('end')
+    start_str = request.GET.get('start_date')
+    end_str = request.GET.get('end_date')
 
     try:
         start_date = datetime.strptime(start_str, '%Y-%m-%d').date()
@@ -817,8 +817,7 @@ def reports_list(request):
     else:
         form = ReportForm()
 
-    reports = Report.objects.all()
-
+    reports = Report.objects.all().order_by('-created_at')  # Сортировка по убыванию даты создания
     context = {
         'form': form,
         'reports': reports,
@@ -830,4 +829,49 @@ def reports_list(request):
 def view_report(request, report_id):
     report = get_object_or_404(Report, id=report_id)
     return JsonResponse(report.result, safe=False)
+    
+def upload_trip(request, vehicle_id):
+    # Загрузка поездки, проверяем, что все точки в диапазоне и не перекрывают другие
+    vehicle = get_object_or_404(Vehicle, id=vehicle_id)
+    
+    if request.method == 'POST':
+        form = TripUploadForm(request.POST, request.FILES)
+        if form.is_valid():
+            start_time = form.cleaned_data['start_time']
+            end_time = form.cleaned_data['end_time']
+            gpx_file = request.FILES['gpx_file']
+            
+            # Проверка на перекрытие существующих поездок
+            if vehicle.trips.filter(start_time__lt=end_time, end_time__gt=start_time).exists():
+                form.add_error(None, "Новая поездка перекрывается с существующими.")
+            else:
+                # Парсинг GPX файла
+                try:
+                    # Если требуется повторное чтение файла, можно сохранить его в переменную
+                    gpx_content = gpx_file.read().decode('utf-8')
+                    gpx = gpxpy.parse(gpx_content)
+                    
+                    # Проходим по всем точкам трека
+                    for track in gpx.tracks:
+                        for segment in track.segments:
+                            for point in segment.points:
+                                if point.time is None or not (start_time <= point.time <= end_time):
+                                    form.add_error('gpx_file', "Все точки трека должны иметь время и находиться в заданном диапазоне.")
+                                    break
+                except Exception as e:
+                    form.add_error('gpx_file', f"Ошибка при обработке GPX файла: {e}")
+            
+            if not form.errors:
+                # Сохраняем новую поездку
+                trip = Trip.objects.create(
+                    vehicle=vehicle,
+                    start_time=start_time,
+                    end_time=end_time,
+                    gpx_file=gpx_file,  # В дальнейшем можно сохранить также извлечённые координаты
+                )
+                return redirect('vehicle_detail', vehicle_id=vehicle.id)
+    else:
+        form = TripUploadForm()
+    
+    return render(request, 'upload_trip.html', {'form': form, 'vehicle': vehicle})
 

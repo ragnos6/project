@@ -128,7 +128,7 @@ def generate_driver_time_report(driver_id, start_date, end_date, period):
     # Предположим, что Trip имеет поле driver=ForeignKey(Driver).
     # Если у вас другая логика, подправьте.
     trips = Trip.objects.filter(
-        driver=driver,
+        vehicle__active_driver=driver,
         start_time__date__gte=start_date,
         end_time__date__lte=end_date
     ).order_by('start_time')
@@ -201,7 +201,7 @@ def generate_enterprise_active_cars_report(enterprise_id, start_date, end_date, 
 
     for vehicle in vehicles:
         driver = vehicle.active_driver
-        driver_name = driver.full_name if driver else None
+        driver_name = driver.name if driver else None
 
         # Логика "пробег" (как в generate_car_mileage_report):
 
@@ -270,7 +270,7 @@ def generate_enterprise_active_cars_report(enterprise_id, start_date, end_date, 
 
     # 3) Создаём запись EnterpriseActiveCarsReport
     report = EnterpriseActiveCarsReport.objects.create(
-        name="Отчёт: Активные авто + пробег",
+        name="Активные авто + пробег",
         start_date=start_date,
         end_date=end_date,
         period=period,

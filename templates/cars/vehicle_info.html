@@ -113,6 +113,13 @@
         </div>
     </div>
 
+    <!-- Кнопка перехода на страницу загрузки поездки -->
+    <div class="text-left mb-4">
+        <a href="{% url 'cars:upload_trip' vehicle.id %}" class="btn btn-success btn-lg">
+            Загрузить поездку
+        </a>
+    </div>
+
     <!-- Форма выбора дат -->
     <div class="card mb-4">
         <div class="card-header bg-secondary text-white">Фильтр поездок</div>

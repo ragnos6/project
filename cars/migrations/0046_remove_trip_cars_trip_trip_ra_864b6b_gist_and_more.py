@@ -23,7 +23,7 @@ class Migration(migrations.Migration):
         migrations.AddField(
             model_name='trip',
             name='end_time',
-            field=models.DateTimeField(default=0),
+            field=models.DateTimeField(null=True, blank=True),
             preserve_default=False,
         ),
         migrations.AddField(

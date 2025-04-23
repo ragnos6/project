@@ -26,7 +26,7 @@ SECRET_KEY = 'django-insecure-50!fhup09pglb9)2ipkhlbv8j*ufahnfwtfhp564fve6dy@a5(
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = True
 
-ALLOWED_HOSTS = []
+ALLOWED_HOSTS = [os.getenv("DJANGO_ALLOWED_HOSTS", "").split(",")]
 
 
 # Application definition
@@ -84,16 +84,18 @@ WSGI_APPLICATION = 'project.wsgi.application'
 # https://docs.djangoproject.com/en/5.1/ref/settings/#databases
 
 DATABASES = {
-    'default': {
-        'ENGINE': 'django.contrib.gis.db.backends.postgis',
-        'NAME': 'projectdb',
-        'USER': 'hunter',
-        'PASSWORD': 'Zhjl1905',
-        'HOST': 'localhost',
-        'PORT': '5432',
+    "default": {
+        "ENGINE": "django.contrib.gis.db.backends.postgis",
+        "NAME":     os.getenv("POSTGRES_DB"),
+        "USER":     os.getenv("POSTGRES_USER"),
+        "PASSWORD": os.getenv("POSTGRES_PASSWORD"),
+        "HOST":     os.getenv("POSTGRES_HOST", "localhost"),
+        "PORT":     os.getenv("POSTGRES_PORT", "5432"),
     }
 }
 
+ALLOWED_HOSTS = os.getenv("ALLOWED_HOSTS", "localhost,127.0.0.1").split(",")
+STATIC_ROOT = "/project/static"  # так же, как в Dockerfile
 
 # Password validation
 # https://docs.djangoproject.com/en/5.1/ref/settings/#auth-password-validators

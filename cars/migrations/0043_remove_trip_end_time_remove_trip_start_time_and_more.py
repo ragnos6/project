@@ -25,7 +25,7 @@ class Migration(migrations.Migration):
         migrations.AddField(
             model_name='trip',
             name='trip_range',
-            field=django.contrib.postgres.fields.ranges.DateTimeRangeField(default=-1),
+            field=django.contrib.postgres.fields.ranges.DateTimeRangeField(null=True, blank=True),
             preserve_default=False,
         ),
         migrations.AlterField(

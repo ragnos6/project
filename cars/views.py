@@ -3,7 +3,9 @@ import os
 import json
 import io
 import zipfile
+import gpxpy
 from django.contrib import messages
+from django.contrib.gis.geos import Point
 from django.shortcuts import render, get_object_or_404, redirect
 from django.contrib.auth.views import LoginView
 from django.core.paginator import Paginator
@@ -831,7 +833,6 @@ def view_report(request, report_id):
     return JsonResponse(report.result, safe=False)
     
 def upload_trip(request, vehicle_id):
-    # Загрузка поездки, проверяем, что все точки в диапазоне и не перекрывают другие
     vehicle = get_object_or_404(Vehicle, id=vehicle_id)
     
     if request.method == 'POST':
@@ -841,15 +842,16 @@ def upload_trip(request, vehicle_id):
             end_time = form.cleaned_data['end_time']
             gpx_file = request.FILES['gpx_file']
             
-            # Проверка на перекрытие существующих поездок
+            # Проверяем, чтобы поездка не перекрывалась с существующими
             if vehicle.trips.filter(start_time__lt=end_time, end_time__gt=start_time).exists():
-                form.add_error(None, "Новая поездка перекрывается с существующими.")
+                form.add_error(None, "Новая поездка конфликтует с существующей.")
             else:
-                # Парсинг GPX файла
                 try:
-                    # Если требуется повторное чтение файла, можно сохранить его в переменную
+                    # Читаем содержимое файла и сбрасываем указатель
                     gpx_content = gpx_file.read().decode('utf-8')
+                    gpx_file.seek(0)
                     gpx = gpxpy.parse(gpx_content)
+                    track_points_list = []  # Список для сохранения данных точек
                     
                     # Проходим по всем точкам трека
                     for track in gpx.tracks:
@@ -858,20 +860,37 @@ def upload_trip(request, vehicle_id):
                                 if point.time is None or not (start_time <= point.time <= end_time):
                                     form.add_error('gpx_file', "Все точки трека должны иметь время и находиться в заданном диапазоне.")
                                     break
+                                # Создаем объект Point (GeoDjango ожидает координаты в формате (долгота, широта))
+                                geo_point = Point(point.longitude, point.latitude)
+                                track_points_list.append({
+                                    'timestamp': point.time,
+                                    'location': geo_point,
+                                })
                 except Exception as e:
                     form.add_error('gpx_file', f"Ошибка при обработке GPX файла: {e}")
             
             if not form.errors:
-                # Сохраняем новую поездку
+                # Создаем объект поездки
                 trip = Trip.objects.create(
                     vehicle=vehicle,
                     start_time=start_time,
                     end_time=end_time,
-                    gpx_file=gpx_file,  # В дальнейшем можно сохранить также извлечённые координаты
+                    gpx_file=gpx_file,
                 )
-                return redirect('vehicle_detail', vehicle_id=vehicle.id)
+                # Создаем объекты TrackPoint для каждой точки маршрута
+                track_points_objects = [
+                    TrackPoint(
+                        vehicle=vehicle,
+                        timestamp=tp['timestamp'],
+                        location=tp['location']
+                    )
+                    for tp in track_points_list
+                ]
+                if track_points_objects:
+                    TrackPoint.objects.bulk_create(track_points_objects)
+                messages.success(request, "Поездка успешно добавлена!")
+                return redirect('cars:vehicle_info', pk=vehicle.id)
     else:
         form = TripUploadForm()
     
-    return render(request, 'upload_trip.html', {'form': form, 'vehicle': vehicle})
-
+    return render(request, 'cars/upload_trip.html', {'form': form, 'vehicle': vehicle})

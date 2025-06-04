@@ -1,0 +1,188 @@
+<!-- templates/cars/reports_list.html -->
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <title>Отчёты</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/bootstrap/5.3.0/css/bootstrap.min.css">
+</head>
+<body>
+<div class="container mt-5">
+
+    <!-- Заголовок страницы -->
+    <div class="d-flex justify-content-between align-items-center mb-4">
+        <h2>Отчёты</h2>
+        <!-- Изменённая кнопка "Назад к предприятиям" -->
+        <a href="{% url 'cars:enterprises_list' %}" class="btn btn-secondary">Назад к предприятиям</a>
+    </div>
+
+    <!-- Сообщения об успехе или ошибках -->
+    {% if messages %}
+        {% for message in messages %}
+            <div class="alert alert-{{ message.tags }} alert-dismissible fade show" role="alert">
+                {{ message }}
+                <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Закрыть"></button>
+            </div>
+        {% endfor %}
+    {% endif %}
+
+    <!-- Форма создания нового отчёта -->
+    <div class="card mb-4">
+        <div class="card-header">
+            Создать отчёт
+        </div>
+        <div class="card-body">
+            <form method="get" action="{% url 'cars:report_api' %}" id="report-form">
+                <!-- Удалён CSRF-токен -->
+                <div class="row g-3">
+                    <div class="col-12 mb-3">
+                        {{ form.report_type.label_tag }}
+                        {{ form.report_type }}
+                        {% if form.report_type.errors %}
+                            <div class="text-danger">{{ form.report_type.errors }}</div>
+                        {% endif %}
+                    </div>
+                    <div class="col-12 mb-3">
+                        {{ form.period.label_tag }}
+                        {{ form.period }}
+                        {% if form.period.errors %}
+                            <div class="text-danger">{{ form.period.errors }}</div>
+                        {% endif %}
+                    </div>
+                    <div class="col-12 mb-3">
+                        {{ form.start_date.label_tag }}
+                        {{ form.start_date }}
+                        {% if form.start_date.errors %}
+                            <div class="text-danger">{{ form.start_date.errors }}</div>
+                        {% endif %}
+                    </div>
+                    <div class="col-12 mb-3">
+                        {{ form.end_date.label_tag }}
+                        {{ form.end_date }}
+                        {% if form.end_date.errors %}
+                            <div class="text-danger">{{ form.end_date.errors }}</div>
+                        {% endif %}
+                    </div>
+                    
+                    <!-- Поля ввода ID -->
+                    <div class="col-12 mb-3 report-field" id="field-vehicle" style="display: none;">
+                        {{ form.vehicle.label_tag }}
+                        <input type="number" name="vehicle_id" id="id_vehicle" class="form-control" placeholder="Введите ID автомобиля" value="{{ form.vehicle.value|default_if_none:'' }}">
+                        {% if form.vehicle.errors %}
+                            <div class="text-danger">{{ form.vehicle.errors }}</div>
+                        {% endif %}
+                    </div>
+                    <div class="col-12 mb-3 report-field" id="field-driver" style="display: none;">
+                        {{ form.driver.label_tag }}
+                        <input type="number" name="driver_id" id="id_driver" class="form-control" placeholder="Введите ID водителя" value="{{ form.driver.value|default_if_none:'' }}">
+                        {% if form.driver.errors %}
+                            <div class="text-danger">{{ form.driver.errors }}</div>
+                        {% endif %}
+                    </div>
+                    <div class="col-12 mb-3 report-field" id="field-enterprise" style="display: none;">
+                        {{ form.enterprise.label_tag }}
+                        <input type="number" name="enterprise_id" id="id_enterprise" class="form-control" placeholder="Введите ID предприятия" value="{{ form.enterprise.value|default_if_none:'' }}">
+                        {% if form.enterprise.errors %}
+                            <div class="text-danger">{{ form.enterprise.errors }}</div>
+                        {% endif %}
+                    </div>
+                </div>
+                <button type="submit" class="btn btn-primary">Создать отчёт</button>
+            </form>
+        </div>
+    </div>
+
+    <!-- Таблица существующих отчётов, отсортированных по дате (последние первые) -->
+    <h3>Существующие отчёты</h3>
+    <table class="table table-striped" id="reports-table">
+        <thead>
+            <tr>
+                <th>Дата создания</th>
+                <th>Тип отчёта</th>
+                <th>Период</th>
+                <th>Дата начала</th>
+                <th>Дата конца</th>
+                <th>Результат</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for report in reports %}
+                <tr>
+                    <td>{{ report.created_at|date:"Y-m-d H:i" }}</td>
+                    <td>{{ report.name }}</td>
+                    <td>{{ report.get_period_display }}</td>
+                    <td>{{ report.start_date }}</td>
+                    <td>{{ report.end_date }}</td>
+                    <td>
+                        <a href="{% url 'cars:view_report' report.id %}" class="btn btn-sm btn-info">Просмотреть</a>
+                    </td>
+                </tr>
+            {% empty %}
+                <tr>
+                    <td colspan="6" class="text-center">Нет созданных отчётов</td>
+                </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+
+</div>
+
+<!-- Модальное окно для просмотра отчёта (по желанию) -->
+<div class="modal fade" id="reportModal" tabindex="-1" aria-labelledby="reportModalLabel" aria-hidden="true">
+  <div class="modal-dialog modal-lg">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title">{{ report.name }}</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Закрыть"></button>
+      </div>
+      <div class="modal-body">
+        <!-- Здесь можно отобразить JSON или другой формат отчёта -->
+        <pre id="report-content"></pre>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/bootstrap/5.3.0/js/bootstrap.bundle.min.js"></script>
+<script>
+    document.addEventListener('DOMContentLoaded', function () {
+        const reportTypeField = document.getElementById('id_report_type');
+        const fieldVehicle = document.getElementById('field-vehicle');
+        const fieldDriver = document.getElementById('field-driver');
+        const fieldEnterprise = document.getElementById('field-enterprise');
+
+        function toggleFields() {
+            const selectedType = reportTypeField.value;
+            // Скрываем все поля и отключаем их
+            fieldVehicle.style.display = 'none';
+            fieldDriver.style.display = 'none';
+            fieldEnterprise.style.display = 'none';
+            document.getElementById('id_vehicle').disabled = true;
+            document.getElementById('id_driver').disabled = true;
+            document.getElementById('id_enterprise').disabled = true;
+
+            // Отображаем нужное поле и включаем его
+            if (selectedType === 'car_mileage') {
+                fieldVehicle.style.display = 'block';
+                document.getElementById('id_vehicle').disabled = false;
+            } else if (selectedType === 'driver_time') {
+                fieldDriver.style.display = 'block';
+                document.getElementById('id_driver').disabled = false;
+            } else if (selectedType === 'enterprise_active_cars') {
+                fieldEnterprise.style.display = 'block';
+                document.getElementById('id_enterprise').disabled = false;
+            }
+        }
+
+        // Инициализация при загрузке страницы
+        toggleFields();
+
+        // Обработчик изменения типа отчёта
+        reportTypeField.addEventListener('change', toggleFields);
+    });
+</script>
+</body>
+</html>
+
+
+

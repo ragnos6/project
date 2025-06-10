@@ -2,52 +2,57 @@ name: Deploy to VPS
 
 on:
   push:
-    branches:
-      - main
+    branches: [main]
 
 jobs:
   deploy:
     runs-on: ubuntu-latest
 
     steps:
-    - name: Checkout repo
+    - name: Checkout repository
       uses: actions/checkout@v4
 
-    - name: Copy project to VPS via SSH
+    - name: Upload project to VPS
       uses: appleboy/scp-action@v0.1.4
       with:
         host: ${{ secrets.VPS_HOST }}
         username: ${{ secrets.VPS_USER }}
         key: ${{ secrets.VPS_SSH_KEY }}
         source: "."
-        target: "~/project"
+        target: "~/django_project"
 
-    - name: Remote deploy script via SSH
+    - name: Deploy over SSH
       uses: appleboy/ssh-action@v1.0.0
       with:
         host: ${{ secrets.VPS_HOST }}
         username: ${{ secrets.VPS_USER }}
         key: ${{ secrets.VPS_SSH_KEY }}
         script: |
-          cd ~/project
-          
-          echo "[*] Pulling latest changes"
+          cd ~/django_project
+
+          echo "[*] Обновление кода"
           git pull origin main || true
 
-          echo "[*] Creating pgdata volume if not exists"
-          if [ ! "$(docker volume ls -q -f name=pgdata)" ]; then
-            docker volume create pgdata
+          echo "[*] Проверка и восстановление тома БД"
+          if [ ! "$(docker volume ls -q -f name=project_db)" ]; then
+            echo "→ Восстановление тома project_db из project_db.tar.gz"
+            docker volume create project_db
             docker run --rm \
-              -v pgdata:/volume \
+              -v project_db:/volume \
               -v $(pwd):/backup \
               alpine \
-              sh -c "cd /volume && tar xzf /backup/pgdata.tar.gz"
+              sh -c "cd /volume && tar xzf /backup/project_db.tar.gz"
+          else
+            echo "→ Том project_db уже существует, пропускаем восстановление"
           fi
 
-          echo "[*] Rebuilding and starting containers"
+          echo "[*] Перезапуск приложения"
           docker compose down
           docker compose up -d --build
 
-          echo "[*] Applying migrations and collecting static files"
-          docker compose exec web python manage.py migrate
-          docker compose exec web python manage.py collectstatic --noinput
+          echo "[*] Применение миграций"
+          docker compose exec project_cars python manage.py makemigrations
+          docker compose exec project_cars python manage.py migrate
+
+          echo "[*] Сбор статических файлов"
+          docker compose exec project_cars python manage.py collectstatic --noinput

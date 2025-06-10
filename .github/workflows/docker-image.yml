@@ -80,3 +80,4 @@ jobs:
 
           echo "[*] Сбор статики..."
           sudo docker compose exec -T project_cars python manage.py collectstatic --noinput
+

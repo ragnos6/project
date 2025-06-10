@@ -1,4 +1,4 @@
-name: Deploy Django Project
+name: Deploy to VPS
 
 on:
   push:
@@ -11,18 +11,43 @@ jobs:
 
     steps:
     - name: Checkout repo
-      uses: actions/checkout@v3
+      uses: actions/checkout@v4
 
-    - name: Deploy over SSH
-      uses: appleboy/ssh-action@v1.0.3
+    - name: Copy project to VPS via SSH
+      uses: appleboy/scp-action@v0.1.4
       with:
-        host: ${{ secrets.SERVER_HOST }}
-        username: ${{ secrets.SERVER_USER }}
-        key: ${{ secrets.DEPLOY_KEY }}
+        host: ${{ secrets.VPS_HOST }}
+        username: ${{ secrets.VPS_USER }}
+        key: ${{ secrets.VPS_SSH_KEY }}
+        source: "."
+        target: "~/project"
+
+    - name: Remote deploy script via SSH
+      uses: appleboy/ssh-action@v1.0.0
+      with:
+        host: ${{ secrets.VPS_HOST }}
+        username: ${{ secrets.VPS_USER }}
+        key: ${{ secrets.VPS_SSH_KEY }}
         script: |
-          cd /home/hunter/project
-          git pull origin main
+          cd ~/project
+          
+          echo "[*] Pulling latest changes"
+          git pull origin main || true
+
+          echo "[*] Creating pgdata volume if not exists"
+          if [ ! "$(docker volume ls -q -f name=pgdata)" ]; then
+            docker volume create pgdata
+            docker run --rm \
+              -v pgdata:/volume \
+              -v $(pwd):/backup \
+              alpine \
+              sh -c "cd /volume && tar xzf /backup/pgdata.tar.gz"
+          fi
+
+          echo "[*] Rebuilding and starting containers"
           docker compose down
           docker compose up -d --build
+
+          echo "[*] Applying migrations and collecting static files"
           docker compose exec web python manage.py migrate
           docker compose exec web python manage.py collectstatic --noinput

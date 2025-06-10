@@ -21,6 +21,8 @@ jobs:
         key: ${{ secrets.VPS_SSH_KEY }}
         source: "."
         target: "~/project"
+        # Копируем только нужные файлы
+        strip_components: 1
 
     - name: Deploy over SSH
       uses: appleboy/ssh-action@v1.0.0
@@ -29,31 +31,44 @@ jobs:
         username: ${{ secrets.VPS_USER }}
         key: ${{ secrets.VPS_SSH_KEY }}
         script: |
-          cd ~/project
-
-          echo "[*] Обновление кода"
-          git pull origin main || true
-
-          echo "[*] Проверка и восстановление тома БД"
-          if [ ! "$(docker volume ls -q -f name=project_db)" ]; then
-            echo "→ Восстановление тома project_db из project_db.tar.gz"
-            docker volume create project_db
-            docker run --rm \
-              -v project_db:/volume \
-              -v $(pwd):/backup \
-              alpine \
-              sh -c "cd /volume && tar xzf /backup/project_db.tar.gz"
-          else
-            echo "→ Том project_db уже существует, пропускаем восстановление"
+          set -e
+          echo "[*] Установка Docker..."
+          if ! command -v docker &> /dev/null; then
+            sudo apt update -y
+            sudo apt install -y ca-certificates curl gnupg lsb-release
+            sudo mkdir -p /etc/apt/keyrings
+            curl -fsSL https://download.docker.com/linux/ubuntu/gpg | sudo gpg --dearmor -o /etc/apt/keyrings/docker.gpg
+            echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/ubuntu $(lsb_release -cs) stable" | sudo tee /etc/apt/sources.list.d/docker.list > /dev/null
+            sudo apt update -y
+            sudo apt install -y docker-ce docker-ce-cli containerd.io docker-compose-plugin
+            sudo usermod -aG docker $USER
+            # Настройка sudo без пароля для docker
+            echo "$USER ALL=(ALL) NOPASSWD: /usr/bin/docker" | sudo tee /etc/sudoers.d/docker
           fi
 
-          echo "[*] Перезапуск приложения"
-          docker compose down
-          docker compose up -d --build
+          cd ~/project
 
-          echo "[*] Применение миграций"
-          docker compose exec project_cars python manage.py makemigrations
-          docker compose exec project_cars python manage.py migrate
+          echo "[*] Восстановление тома БД..."
+          if [ ! "$(sudo docker volume ls -q -f name=project_db)" ]; then
+            if [ -f "project_db.tar.gz" ]; then
+              sudo docker volume create project_db
+              sudo docker run --rm -v project_db:/volume -v $(pwd):/backup alpine sh -c "tar xzf /backup/project_db.tar.gz -C /volume"
+            else
+              sudo docker volume create project_db
+              echo "→ Предупреждение: project_db.tar.gz не найден"
+            fi
+          fi
 
-          echo "[*] Сбор статических файлов"
-          docker compose exec project_cars python manage.py collectstatic --noinput
+          echo "[*] Перезапуск контейнеров..."
+          sudo docker compose down --remove-orphans || true
+          sudo docker compose up -d --build
+
+          echo "[*] Ожидание старта БД (15 сек)..."
+          sleep 15
+
+          echo "[*] Применение миграций..."
+          sudo docker compose exec -T project_cars python manage.py makemigrations
+          sudo docker compose exec -T project_cars python manage.py migrate
+
+          echo "[*] Сбор статики..."
+          sudo docker compose exec -T project_cars python manage.py collectstatic --noinput

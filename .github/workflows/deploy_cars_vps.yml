@@ -1,0 +1,114 @@
+name: Deploy Cars Project to VPS
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 1  # при желании можно ограничить глубину клонирования
+
+    - name: Upload project to VPS
+      uses: appleboy/scp-action@v0.1.4
+      with:
+        host: ${{ secrets.VPS_HOST }}
+        username: ${{ secrets.VPS_USER }}
+        key: ${{ secrets.VPS_SSH_KEY }}
+        source: "."
+        target: "~/project"
+        strip_components: 1
+        overwrite: true
+
+    - name: Deploy over SSH
+      uses: appleboy/ssh-action@v1.0.0
+      with:
+        host: ${{ secrets.VPS_HOST }}
+        username: ${{ secrets.VPS_USER }}
+        key: ${{ secrets.VPS_SSH_KEY }}
+        script: |
+          set -e
+          echo "=== Начало деплоя ==="
+
+          echo "[*] Установка Docker и Docker Compose при необходимости..."
+          if ! command -v docker &> /dev/null; then
+            echo "→ Установка Docker..."
+            sudo apt update -y
+            sudo apt install -y apt-transport-https ca-certificates curl gnupg lsb-release
+            curl -fsSL https://get.docker.com | sudo sh
+            # Добавление в группу docker, но текущая сессия всё равно будет требовать sudo для docker-операций
+            sudo usermod -aG docker $USER || true
+          fi
+
+          if ! command -v docker-compose &> /dev/null; then
+            echo "→ Установка Docker Compose..."
+            # Здесь можно зафиксировать версию вместо динамического получения
+            COMPOSE_VERSION=$(curl -s https://api.github.com/repos/docker/compose/releases/latest | grep '"tag_name":' | cut -d'"' -f4)
+            sudo curl -L "https://github.com/docker/compose/releases/download/${COMPOSE_VERSION}/docker-compose-$(uname -s)-$(uname -m)" -o /usr/local/bin/docker-compose
+            sudo chmod +x /usr/local/bin/docker-compose
+          fi
+
+          cd ~/project
+
+          echo "[*] Остановка и пересборка контейнеров..."
+          sudo docker-compose down || true
+          sudo docker-compose up -d --build
+
+          echo "[*] Проверка и восстановление БД из архива (если имеется)..."
+          if [ -f "project_db.tar.gz" ]; then
+            echo "→ Найден архив project_db.tar.gz, выполняется восстановление..."
+            sudo docker volume create project_db || true
+            sudo docker run --rm \
+              -v project_db:/restore \
+              -v "$(pwd)":/backup \
+              alpine \
+              sh -c "rm -rf /restore/* && tar xzf /backup/project_db.tar.gz -C /restore"
+          else
+            echo "→ Архив project_db.tar.gz не найден — используется чистая база."
+          fi
+
+          echo "[*] Перезапуск контейнеров после восстановления..."
+          sudo docker-compose down || true
+          sudo docker-compose up -d
+
+          echo "[*] Ожидание готовности базы данных (PostGIS)..."
+          for i in {1..24}; do
+            STATUS=$(sudo docker inspect --format '{{.State.Health.Status}}' project_db 2>/dev/null || echo "starting")
+            if [ "$STATUS" = "healthy" ]; then
+              echo "→ БД готова к подключению!"
+              break
+            fi
+            echo "→ Статус БД: $STATUS ($i/24)"
+            sleep 5
+            if [ $i -eq 24 ]; then
+              echo "[!] Ошибка: БД не запустилась вовремя"
+              sudo docker logs project_db || true
+              exit 1
+            fi
+          done
+
+          echo "[*] Применение миграций Django..."
+          # Предпочтительно хранить миграции в репозитории, а здесь лишь выполнять migrate
+          sudo docker-compose exec -T web python manage.py migrate
+
+          echo "[*] Сборка статики Django..."
+          sudo docker-compose exec -T web python manage.py collectstatic --noinput --clear
+
+          echo "[*] Проверка доступности приложения..."
+          # Проверка HTTP-эндпоинта; скорректируйте URL/порт при необходимости (например, health endpoint или прокси)
+          if curl -sSf --retry 3 --retry-delay 5 http://localhost:8000 > /dev/null; then
+            echo "→ Приложение успешно запущено!"
+          else
+            echo "[!] Ошибка: приложение не отвечает"
+            sudo docker-compose logs web || true
+            exit 1
+          fi
+
+          echo "=== Деплой завершён успешно ==="

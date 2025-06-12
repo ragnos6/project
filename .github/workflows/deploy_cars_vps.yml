@@ -100,41 +100,11 @@ jobs:
             fi
           done
     
-          # Восстановление БД (если нужно)
-          if [ -f ~/project/project_2025-05-03.dump ]; then
-            echo "[*] Восстановление БД из резервной копии..."
-            export PGPASSWORD=$(grep '^POSTGRES_PASSWORD=' ~/project/.env | cut -d '=' -f2-)
-            DB_USER=$(grep '^POSTGRES_USER=' ~/project/.env | cut -d '=' -f2-)
-            DB_NAME=$(grep '^POSTGRES_DB=' ~/project/.env | cut -d '=' -f2-)
-            
-            if [ -z "$DB_USER" ] || [ -z "$DB_NAME" ] || [ -z "$PGPASSWORD" ]; then
-              echo "[!] Ошибка: не удалось прочитать параметры БД из .env"
-              exit 1
-            fi
-            
-            echo "→ Начало восстановления..."
-            cat ~/project/project_2025-05-03.dump | sudo docker-compose exec -T db \
-              pg_restore -U "$DB_USER" -d "$DB_NAME" --clean --if-exists
-            echo "[√] Восстановление завершено"
-          else
-            echo "[*] Резервная копия не найдена, пропускаем восстановление"
-          fi
-    
           # Миграции и статика
           echo "[*] Применение миграций Django..."
           sudo docker-compose exec web python manage.py migrate
     
           echo "[*] Сборка статики Django..."
           sudo docker-compose exec web python manage.py collectstatic --noinput --clear
-    
-          # Проверка работы приложения
-          echo "[*] Проверка доступности приложения..."
-          if curl -sSf --retry 3 --retry-delay 10 http://localhost:8000 > /dev/null; then
-            echo "[√] Приложение успешно запущено!"
-          else
-            echo "[!] Ошибка: приложение не отвечает"
-            sudo docker-compose logs web
-            exit 1
-          fi
     
           echo "=== Деплой завершён успешно ==="

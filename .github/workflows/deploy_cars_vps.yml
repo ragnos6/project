@@ -70,66 +70,71 @@ jobs:
           fi
 
           cd ~/project
-
+    
           echo "[*] Обновление docker-compose.yml для использования готового образа..."
           sudo sed -i 's|build: \.|image: hunter6868/project_cars:0.2|g' docker-compose.yml
-
+    
           echo "[*] Остановка и удаление старых контейнеров..."
           sudo docker-compose down --rmi all --remove-orphans || true
-
+    
           echo "[*] Скачивание нового образа из Docker Hub..."
           echo "${{ secrets.DOCKERHUB_PASSWORD }}" | sudo docker login -u "${{ secrets.DOCKERHUB_USERNAME }}" --password-stdin
           sudo docker-compose pull
-
-          echo "[*] Запуск контейнеров..."
-          sudo docker-compose up
-
-          echo "[*] Ожидание готовности базы данных ..."
+    
+          echo "[*] Запуск контейнеров в фоновом режиме..."
+          sudo docker-compose up -d
+    
+          # Ожидание готовности базы данных
+          echo "[*] Ожидание готовности базы данных (максимум 2 минуты)..."
           for i in {1..24}; do
-            STATUS=$(sudo docker inspect --format '{{.State.Health.Status}}' project_db 2>/dev/null || echo "starting")
-            if [ "$STATUS" = "healthy" ]; then
-              echo "→ БД готова к подключению! (попытка $i/24)"
+            if sudo docker-compose exec db pg_isready -U postgres; then
+              echo "→ БД готова к подключению!"
               break
             fi
-            echo "→ Статус БД: $STATUS (попытка $i/24)"
+            echo "→ Ожидание БД... (попытка $i/24)"
             sleep 5
             if [ $i -eq 24 ]; then
               echo "[!] Ошибка: БД не запустилась вовремя"
-              sudo docker logs project_db || true
+              sudo docker-compose logs db
               exit 1
             fi
           done
-
+    
+          # Восстановление БД (если нужно)
           if [ -f ~/project/project_2025-05-03.dump ]; then
-            echo "[*] Восстановление БД из резервной копии backup.dump..."
+            echo "[*] Восстановление БД из резервной копии..."
             export PGPASSWORD=$(grep '^POSTGRES_PASSWORD=' ~/project/.env | cut -d '=' -f2-)
             DB_USER=$(grep '^POSTGRES_USER=' ~/project/.env | cut -d '=' -f2-)
             DB_NAME=$(grep '^POSTGRES_DB=' ~/project/.env | cut -d '=' -f2-)
+            
             if [ -z "$DB_USER" ] || [ -z "$DB_NAME" ] || [ -z "$PGPASSWORD" ]; then
-              echo "[!] Не удалось прочитать параметры БД из .env. Проверьте переменные POSTGRES_USER, POSTGRES_PASSWORD, POSTGRES_DB."
+              echo "[!] Ошибка: не удалось прочитать параметры БД из .env"
               exit 1
             fi
-            echo "→ Начало pg_restore..."
+            
+            echo "→ Начало восстановления..."
             cat ~/project/project_2025-05-03.dump | sudo docker-compose exec -T db \
               pg_restore -U "$DB_USER" -d "$DB_NAME" --clean --if-exists
-            echo "[*] Восстановление завершено."
+            echo "[√] Восстановление завершено"
           else
-            echo "[*] Файл backup.dump не найден, пропускаем восстановление."
+            echo "[*] Резервная копия не найдена, пропускаем восстановление"
           fi
-
+    
+          # Миграции и статика
           echo "[*] Применение миграций Django..."
-          sudo docker-compose exec -T web python manage.py migrate
-
+          sudo docker-compose exec web python manage.py migrate
+    
           echo "[*] Сборка статики Django..."
-          sudo docker-compose exec -T web python manage.py collectstatic --noinput --clear
-
+          sudo docker-compose exec web python manage.py collectstatic --noinput --clear
+    
+          # Проверка работы приложения
           echo "[*] Проверка доступности приложения..."
-          if curl -sSf --retry 3 --retry-delay 5 http://localhost:8000 > /dev/null; then
-            echo "→ Приложение успешно запущено!"
+          if curl -sSf --retry 3 --retry-delay 10 http://localhost:8000 > /dev/null; then
+            echo "[√] Приложение успешно запущено!"
           else
             echo "[!] Ошибка: приложение не отвечает"
-            sudo docker-compose logs web || true
+            sudo docker-compose logs web
             exit 1
           fi
-
+    
           echo "=== Деплой завершён успешно ==="

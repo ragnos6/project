@@ -86,7 +86,7 @@ jobs:
           fi
 
           echo "[*] Запуск контейнеров..."
-          sudo docker-compose up -d
+          sudo docker-compose up
 
           echo "[*] Ожидание готовности базы данных ..."
           for i in {1..24}; do

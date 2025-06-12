@@ -63,7 +63,7 @@ jobs:
           cd ~/project
 
           echo "[*] Обновление docker-compose.yml для использования готового образа..."
-          sudo sed -i 's|build: \.|image: hunter6868/project_cars:0.1|g' docker-compose.yml
+          sudo sed -i 's|build: \.|image: jandigarte/django:latest|g' docker-compose.yml
 
           echo "[*] Остановка и удаление старых контейнеров..."
           sudo docker-compose down --rmi all --remove-orphans || true

@@ -138,7 +138,7 @@ jobs:
           else
             echo "→ Дамп не найден. Пропускаем восстановление."
           fi
-          sudo docker-compose up web
+          sudo docker-compose up web -d
 
           echo "[*] Применение миграций Django..."
           sudo docker-compose exec web python manage.py migrate

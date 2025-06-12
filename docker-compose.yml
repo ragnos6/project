@@ -21,7 +21,6 @@ services:
 
   db:
     image: kartoza/postgis:15-3.3
-    platform: linux/arm64
     container_name: project_db
     volumes:
       - project_db:/var/lib/postgresql/

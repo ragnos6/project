@@ -106,19 +106,8 @@ jobs:
             
             export PGPASSWORD="Zhjl1905"
             
-            echo "→ Дропаем базу projectdb, если существует..."
-            # Используем пользователя hunter для административных операций
-            sudo docker-compose exec -T db su postgres -c 'psql -d postgres -c "DROP DATABASE IF EXISTS projectdb;"' || {
-              echo "[!] Не удалось дропнуть базу projectdb"; exit 1;
-            }
-            
-            echo "→ Создаём базу projectdb..."
-            sudo docker-compose exec -T db psql -U hunter -d postgres -c "CREATE DATABASE projectdb OWNER hunter;" || {
-              echo "[!] Не удалось создать базу projectdb"; exit 1;
-            }
-            
             echo "→ Восстанавливаем из ~/project/backups/dump_1.sql..."
-            cat ~/project/backups/dump_1.sql | sudo docker-compose exec -T db psql -U hunter -d projectdb || {
+            cat ~/project/backups/dump_1.sql | sudo docker-compose exec -T db su postgres -c 'psql -U hunter -d projectdb' || {
               echo "[!] Ошибка при восстановлении дампа"; exit 1;
             }
             

@@ -100,6 +100,22 @@ jobs:
             fi
           done
     
+          echo "[*] Проверка наличия дампа для восстановления..."
+            if [ -f ~/project/backups/dump_1.sql ]; then
+              echo "→ Найден дамп БД. Восстанавливаем..."
+              DB_NAME=$(grep DB_NAME ~/project/.env | cut -d '=' -f2)
+            
+            # Дропаем и создаем заново БД для чистого восстановления
+              sudo docker-compose exec -T db psql -U postgres -c "DROP DATABASE IF EXISTS $DB_NAME;"
+              sudo docker-compose exec -T db psql -U postgres -c "CREATE DATABASE $DB_NAME;"
+            
+            # Восстанавливаем данные
+              cat ~/project/backups/dump_1.sql | sudo docker-compose exec -T db psql -U postgres -d $DB_NAME
+              echo "✓ База данных успешно восстановлена из дампа"
+            else
+              echo "→ Дамп не найден. Пропускаем восстановление."
+            fi
+    
           # Миграции и статика
           echo "[*] Применение миграций Django..."
           sudo docker-compose exec web python manage.py migrate

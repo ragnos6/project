@@ -103,27 +103,29 @@ jobs:
           echo "[*] Проверка наличия дампа для восстановления..."
           if [ -f ~/project/backups/dump_1.sql ]; then
             echo "→ Найден дамп БД. Восстанавливаем..."
-          
+            
+            # Используем пароль из переменных окружения контейнера
             export PGPASSWORD="Zhjl1905"
             
             echo "→ Дропаем базу projectdb, если существует..."
-            sudo docker-compose exec -T db psql -h localhost -U postgres -d postgres -c "DROP DATABASE IF EXISTS projectdb;" || {
+            # Используем пользователя hunter для административных операций
+            sudo docker-compose exec -T db psql -U hunter -d postgres -c "DROP DATABASE IF EXISTS projectdb;" || {
               echo "[!] Не удалось дропнуть базу projectdb"; exit 1;
             }
-          
+            
             echo "→ Создаём базу projectdb..."
-            sudo docker-compose exec -T db psql -U hunter -d projectdb -c "CREATE DATABASE projectdb OWNER hunter;" || {
+            sudo docker-compose exec -T db psql -U hunter -d postgres -c "CREATE DATABASE projectdb OWNER hunter;" || {
               echo "[!] Не удалось создать базу projectdb"; exit 1;
             }
-          
+            
             # Восстанавливаем данные из дампа
             echo "→ Восстанавливаем из ~/project/backups/dump_1.sql..."
             cat ~/project/backups/dump_1.sql | sudo docker-compose exec -T db psql -U hunter -d projectdb || {
               echo "[!] Ошибка при восстановлении дампа"; exit 1;
             }
-          
+            
             echo "✓ База данных успешно восстановлена из дампа"
-            # Очистим переменную, если она не нужна далее
+            # Очистим переменную
             unset PGPASSWORD
           else
             echo "→ Дамп не найден. Пропускаем восстановление."

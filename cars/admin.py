@@ -1,7 +1,7 @@
 from django.contrib import admin
 from cars.models import Vehicle, VehicleDocumentation, Model, Enterprise, Driver, VehicleDriver, Manager, TrackPoint
 from django.contrib.gis import admin as geoadmin
-from leaflet.admin import LeafletGeoAdmin
+from leaflet.admin import LeafletGeoAdminMixin
 
 class CarsAssigment(admin.TabularInline):
     model = VehicleDriver
@@ -48,6 +48,6 @@ class ManagerAdmin(admin.ModelAdmin):
     get_enterprises.short_description = "Предприятия"
 
 @admin.register(TrackPoint)
-class TrackPointAdmin(LeafletGeoAdmin):
+class TrackPointAdmin(LeafletGeoAdminMixin, admin.ModelAdmin):
     list_display = ('vehicle', 'timestamp', 'location')
     list_filter = ('vehicle', 'timestamp')

@@ -8,13 +8,10 @@ on:
 jobs:
   deploy:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
 
     steps:
     - name: Checkout repository
       uses: actions/checkout@v4
-      with:
-        fetch-depth: 1  # при желании можно ограничить глубину клонирования
 
     - name: Upload project to VPS
       uses: appleboy/scp-action@v0.1.4
@@ -27,10 +24,15 @@ jobs:
         strip_components: 1
         overwrite: true
 
-    - name: Create .env file
-      run: echo "${{ secrets.ENV_FILE }}" > .env
+    - name: Create .env on VPS
+      uses: appleboy/ssh-action@v1.0.0
       with:
-        target: "~/project"
+        host: ${{ secrets.VPS_HOST }}
+        username: ${{ secrets.VPS_USER }}
+        key: ${{ secrets.VPS_SSH_KEY }}
+        script: |
+          echo "${{ secrets.ENV_FILE }}" > ~/project/.env
+          chmod 600 ~/project/.env
 
     - name: Deploy over SSH
       uses: appleboy/ssh-action@v1.0.0
@@ -54,7 +56,6 @@ jobs:
 
           if ! command -v docker-compose &> /dev/null; then
             echo "→ Установка Docker Compose..."
-            # Здесь можно зафиксировать версию вместо динамического получения
             COMPOSE_VERSION=$(curl -s https://api.github.com/repos/docker/compose/releases/latest | grep '"tag_name":' | cut -d'"' -f4)
             sudo curl -L "https://github.com/docker/compose/releases/download/${COMPOSE_VERSION}/docker-compose-$(uname -s)-$(uname -m)" -o /usr/local/bin/docker-compose
             sudo chmod +x /usr/local/bin/docker-compose
@@ -83,7 +84,7 @@ jobs:
           sudo docker-compose down || true
           sudo docker-compose up -d
 
-          echo "[*] Ожидание готовности базы данных (PostGIS)..."
+          echo "[*] Ожидание готовности базы данных ..."
           for i in {1..24}; do
             STATUS=$(sudo docker inspect --format '{{.State.Health.Status}}' project_db 2>/dev/null || echo "starting")
             if [ "$STATUS" = "healthy" ]; then
@@ -100,7 +101,6 @@ jobs:
           done
 
           echo "[*] Применение миграций Django..."
-          # Предпочтительно хранить миграции в репозитории, а здесь лишь выполнять migrate
           sudo docker-compose exec -T web python manage.py migrate
 
           echo "[*] Сборка статики Django..."

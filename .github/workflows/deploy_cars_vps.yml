@@ -45,6 +45,8 @@ jobs:
           echo "=== Начало деплоя ==="
           
           echo "[*] Установка Docker и Docker Compose при необходимости..."
+          
+          # Установка Docker, если не установлен
           if ! command -v docker &> /dev/null; then
             echo "→ Установка Docker..."
             sudo apt update -y
@@ -52,12 +54,19 @@ jobs:
             curl -fsSL https://get.docker.com | sudo sh
             sudo usermod -aG docker $USER || true
           fi
-
-          if ! command -v docker-compose &> /dev/null; then
-            echo "→ Установка Docker Compose..."
+          
+          # Проверка и установка плагина Docker Compose (рекомендуется)
+          if ! docker compose version &> /dev/null; then
+            echo "→ Установка Docker Compose (CLI плагин)..."
+            DOCKER_CONFIG=${DOCKER_CONFIG:-$HOME/.docker}
+            mkdir -p $DOCKER_CONFIG/cli-plugins
+          
             COMPOSE_VERSION=$(curl -s https://api.github.com/repos/docker/compose/releases/latest | grep '"tag_name":' | sed -E 's/.*"([^"]+)".*/\1/')
-            sudo curl -L "https://github.com/docker/compose/releases/download/$COMPOSE_VERSION/docker-compose-$(uname -s)-$(uname -m)" -o /usr/local/bin/docker-compose
-            sudo chmod +x /usr/local/bin/docker-compose
+          
+            sudo curl -L "https://github.com/docker/compose/releases/download/$COMPOSE_VERSION/docker-compose-$(uname -s)-$(uname -m)" \
+              -o $DOCKER_CONFIG/cli-plugins/docker-compose
+          
+            sudo chmod +x $DOCKER_CONFIG/cli-plugins/docker-compose
           fi
 
           cd ~/project

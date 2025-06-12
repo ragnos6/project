@@ -105,11 +105,11 @@ jobs:
               echo "→ Найден дамп БД. Восстанавливаем..."
             
             # Дропаем и создаем заново БД для чистого восстановления
-              sudo docker-compose exec -T db psql -U hunter -W Zhjl1905 -c "DROP DATABASE IF EXISTS projectdb;"
-              sudo docker-compose exec -T db psql -U hunter -W Zhjl1905 -c "CREATE DATABASE projectdb;"
+              sudo docker-compose exec -T db psql -h localhost -U hunter -W Zhjl1905 -c "DROP DATABASE IF EXISTS projectdb;"
+              sudo docker-compose exec -T db psql -h localhost -U hunter -W Zhjl1905 -c "CREATE DATABASE projectdb;"
             
             # Восстанавливаем данные
-              cat ~/project/backups/dump_1.sql | sudo docker-compose exec -T db psql -U hunter -W Zhjl1905 -d projectdb
+              cat ~/project/backups/dump_1.sql | sudo docker-compose exec -T db psql -h localhost -U hunter -W Zhjl1905 -d projectdb
               echo "✓ База данных успешно восстановлена из дампа"
             else
               echo "→ Дамп не найден. Пропускаем восстановление."

@@ -50,22 +50,27 @@ jobs:
             sudo apt update -y
             sudo apt install -y apt-transport-https ca-certificates curl gnupg lsb-release
             curl -fsSL https://get.docker.com | sudo sh
-            # Добавление в группу docker, но текущая сессия всё равно будет требовать sudo для docker-операций
             sudo usermod -aG docker $USER || true
           fi
 
           if ! command -v docker-compose &> /dev/null; then
             echo "→ Установка Docker Compose..."
-            COMPOSE_VERSION=$(curl -s https://api.github.com/repos/docker/compose/releases/latest | grep '"tag_name":' | cut -d'"' -f4)
-            sudo curl -L "https://github.com/docker/compose/releases/download/${COMPOSE_VERSION}/docker-compose-$(uname -s)-$(uname -m)" -o /usr/local/bin/docker-compose
+            COMPOSE_VERSION=$(curl -s https://api.github.com/repos/docker/compose/releases/latest | grep '"tag_name":' | sed -E 's/.*"([^"]+)".*/\1/')
+            sudo curl -L "https://github.com/docker/compose/releases/download/$COMPOSE_VERSION/docker-compose-$(uname -s)-$(uname -m)" -o /usr/local/bin/docker-compose
             sudo chmod +x /usr/local/bin/docker-compose
           fi
 
           cd ~/project
 
-          echo "[*] Остановка и пересборка контейнеров..."
-          sudo docker-compose down || true
-          sudo docker-compose up -d --build
+          echo "[*] Обновление docker-compose.yml для использования готового образа..."
+          sudo sed -i 's|build: \.|image: hunter6868/project_cars:0.1|g' docker-compose.yml
+
+          echo "[*] Остановка и удаление старых контейнеров..."
+          sudo docker-compose down --rmi all --remove-orphans || true
+
+          echo "[*] Скачивание нового образа из Docker Hub..."
+          echo "${{ secrets.DOCKERHUB_PASSWORD }}" | sudo docker login -u "${{ secrets.DOCKERHUB_USERNAME }}" --password-stdin
+          sudo docker-compose pull
 
           echo "[*] Проверка и восстановление БД из архива (если имеется)..."
           if [ -f "project_db.tar.gz" ]; then
@@ -80,18 +85,17 @@ jobs:
             echo "→ Архив project_db.tar.gz не найден — используется чистая база."
           fi
 
-          echo "[*] Перезапуск контейнеров после восстановления..."
-          sudo docker-compose down || true
+          echo "[*] Запуск контейнеров..."
           sudo docker-compose up -d
 
           echo "[*] Ожидание готовности базы данных ..."
           for i in {1..24}; do
             STATUS=$(sudo docker inspect --format '{{.State.Health.Status}}' project_db 2>/dev/null || echo "starting")
             if [ "$STATUS" = "healthy" ]; then
-              echo "→ БД готова к подключению!"
+              echo "→ БД готова к подключению! (попытка $i/24)"
               break
             fi
-            echo "→ Статус БД: $STATUS ($i/24)"
+            echo "→ Статус БД: $STATUS (попытка $i/24)"
             sleep 5
             if [ $i -eq 24 ]; then
               echo "[!] Ошибка: БД не запустилась вовремя"
@@ -107,7 +111,6 @@ jobs:
           sudo docker-compose exec -T web python manage.py collectstatic --noinput --clear
 
           echo "[*] Проверка доступности приложения..."
-          # Проверка HTTP-эндпоинта; скорректируйте URL/порт при необходимости (например, health endpoint или прокси)
           if curl -sSf --retry 3 --retry-delay 5 http://localhost:8000 > /dev/null; then
             echo "→ Приложение успешно запущено!"
           else

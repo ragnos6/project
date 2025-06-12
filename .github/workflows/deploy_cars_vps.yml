@@ -104,12 +104,11 @@ jobs:
           if [ -f ~/project/backups/dump_1.sql ]; then
             echo "→ Найден дамп БД. Восстанавливаем..."
             
-            # Используем пароль из переменных окружения контейнера
             export PGPASSWORD="Zhjl1905"
             
             echo "→ Дропаем базу projectdb, если существует..."
             # Используем пользователя hunter для административных операций
-            sudo docker-compose exec -T db psql -U hunter -d postgres -c "DROP DATABASE IF EXISTS projectdb;" || {
+            sudo docker-compose exec -T db su postgres -c 'psql -d postgres -c "DROP DATABASE IF EXISTS projectdb;"' || {
               echo "[!] Не удалось дропнуть базу projectdb"; exit 1;
             }
             
@@ -118,7 +117,6 @@ jobs:
               echo "[!] Не удалось создать базу projectdb"; exit 1;
             }
             
-            # Восстанавливаем данные из дампа
             echo "→ Восстанавливаем из ~/project/backups/dump_1.sql..."
             cat ~/project/backups/dump_1.sql | sudo docker-compose exec -T db psql -U hunter -d projectdb || {
               echo "[!] Ошибка при восстановлении дампа"; exit 1;
@@ -132,7 +130,6 @@ jobs:
           fi
 
     
-          # Миграции и статика
           echo "[*] Применение миграций Django..."
           sudo docker-compose exec web python manage.py migrate
     

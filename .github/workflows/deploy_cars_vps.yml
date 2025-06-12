@@ -128,7 +128,7 @@ jobs:
             }
             
             echo "→ Восстанавливаем из ~/project/backups/dump_1.sql..."
-            cat ~/project/backups/dump_1.sql | sudo docker-compose exec -T db su postgres -c 'psql -U hunter -d projectdb' || {
+            cat ~/project/backups/dump_1.sql | sudo docker-compose exec -T db su postgres -c 'psql -d projectdb' || {
               echo "[!] Ошибка при восстановлении дампа"; exit 1;
             }
             

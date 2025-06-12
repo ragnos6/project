@@ -72,19 +72,6 @@ jobs:
           echo "${{ secrets.DOCKERHUB_PASSWORD }}" | sudo docker login -u "${{ secrets.DOCKERHUB_USERNAME }}" --password-stdin
           sudo docker-compose pull
 
-          echo "[*] Проверка и восстановление БД из архива (если имеется)..."
-          if [ -f "project_db.tar.gz" ]; then
-            echo "→ Найден архив project_db.tar.gz, выполняется восстановление..."
-            sudo docker volume create project_db || true
-            sudo docker run --rm \
-              -v project_db:/restore \
-              -v "$(pwd)":/backup \
-              alpine \
-              sh -c "rm -rf /restore/* && tar xzf /backup/project_db.tar.gz -C /restore"
-          else
-            echo "→ Архив project_db.tar.gz не найден — используется чистая база."
-          fi
-
           echo "[*] Запуск контейнеров..."
           sudo docker-compose up
 

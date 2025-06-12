@@ -105,9 +105,9 @@ jobs:
             echo "→ Найден дамп БД. Восстанавливаем..."
           
             export PGPASSWORD="Zhjl1905"
-          
+            
             echo "→ Дропаем базу projectdb, если существует..."
-            sudo docker-compose exec -T db psql -U hunter -d postgres -c "DROP DATABASE IF EXISTS projectdb;" || {
+            sudo docker-compose exec -T db psql -h localhost -U postgres -d postgres -c "DROP DATABASE IF EXISTS projectdb;" || {
               echo "[!] Не удалось дропнуть базу projectdb"; exit 1;
             }
           

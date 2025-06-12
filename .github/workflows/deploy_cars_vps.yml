@@ -100,6 +100,23 @@ jobs:
             fi
           done
 
+          if [ -f ~/project/project_2025-05-03.dump ]; then
+            echo "[*] Восстановление БД из резервной копии backup.dump..."
+            export PGPASSWORD=$(grep '^POSTGRES_PASSWORD=' ~/project/.env | cut -d '=' -f2-)
+            DB_USER=$(grep '^POSTGRES_USER=' ~/project/.env | cut -d '=' -f2-)
+            DB_NAME=$(grep '^POSTGRES_DB=' ~/project/.env | cut -d '=' -f2-)
+            if [ -z "$DB_USER" ] || [ -z "$DB_NAME" ] || [ -z "$PGPASSWORD" ]; then
+              echo "[!] Не удалось прочитать параметры БД из .env. Проверьте переменные POSTGRES_USER, POSTGRES_PASSWORD, POSTGRES_DB."
+              exit 1
+            fi
+            echo "→ Начало pg_restore..."
+            cat ~/project/project_2025-05-03.dump | sudo docker-compose exec -T db \
+              pg_restore -U "$DB_USER" -d "$DB_NAME" --clean --if-exists
+            echo "[*] Восстановление завершено."
+          else
+            echo "[*] Файл backup.dump не найден, пропускаем восстановление."
+          fi
+
           echo "[*] Применение миграций Django..."
           sudo docker-compose exec -T web python manage.py migrate
 

@@ -105,7 +105,7 @@ jobs:
             echo "→ Найден дамп БД. Восстанавливаем..."
             
             export PGPASSWORD="Zhjl1905"
-            sudo docker-compose stop project_cars
+            sudo docker-compose stop web
             echo "→ Дропаем базу projectdb, если существует..."
             # Используем пользователя hunter для административных операций
             sudo docker-compose exec -T db su postgres -c 'psql -d postgres -c "DROP DATABASE IF EXISTS projectdb;"' || {
@@ -128,7 +128,7 @@ jobs:
           else
             echo "→ Дамп не найден. Пропускаем восстановление."
           fi
-          sudo docker-compose up project_cars
+          sudo docker-compose up web
 
           echo "[*] Применение миграций Django..."
           sudo docker-compose exec web python manage.py migrate

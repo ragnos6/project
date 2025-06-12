@@ -27,6 +27,11 @@ jobs:
         strip_components: 1
         overwrite: true
 
+    - name: Create .env file
+      run: echo "${{ secrets.ENV_FILE }}" > .env
+      with:
+        target: "~/project"
+
     - name: Deploy over SSH
       uses: appleboy/ssh-action@v1.0.0
       with:
@@ -36,7 +41,7 @@ jobs:
         script: |
           set -e
           echo "=== Начало деплоя ==="
-
+          
           echo "[*] Установка Docker и Docker Compose при необходимости..."
           if ! command -v docker &> /dev/null; then
             echo "→ Установка Docker..."

@@ -75,7 +75,7 @@ jobs:
           sudo sed -i 's|build: \.|image: hunter6868/project_cars:0.2|g' docker-compose.yml
     
           echo "[*] Остановка и удаление старых контейнеров..."
-          sudo docker-compose down --rmi all --remove-orphans || true
+          sudo docker compose down --rmi all --remove-orphans || true
     
           echo "[*] Скачивание нового образа из Docker Hub..."
           echo "${{ secrets.DOCKERHUB_PASSWORD }}" | sudo docker login -u "${{ secrets.DOCKERHUB_USERNAME }}" --password-stdin
@@ -118,17 +118,17 @@ jobs:
             }
             echo "→ Дропаем базу projectdb, если существует..."
             # Используем пользователя hunter для административных операций
-            sudo docker-compose exec -T db su postgres -c 'psql -d postgres -c "DROP DATABASE IF EXISTS projectdb;"' || {
+            sudo docker compose exec -T db su postgres -c 'psql -d postgres -c "DROP DATABASE IF EXISTS projectdb;"' || {
               echo "[!] Не удалось дропнуть базу projectdb"; exit 1;
             }
             
             echo "→ Создаём базу projectdb..."
-            sudo docker-compose exec -T db su postgres -c 'psql -d postgres -c "CREATE DATABASE projectdb OWNER hunter;"' || {
+            sudo docker compose exec -T db su postgres -c 'psql -d postgres -c "CREATE DATABASE projectdb OWNER hunter;"' || {
               echo "[!] Не удалось создать базу projectdb"; exit 1;
             }
             
             echo "→ Восстанавливаем из ~/project/backups/dump_1.sql..."
-            cat ~/project/backups/dump_1.sql | sudo docker-compose exec -T db su postgres -c 'psql -d projectdb' || {
+            cat ~/project/backups/dump_1.sql | sudo docker compose exec -T db su postgres -c 'psql -d projectdb' || {
               echo "[!] Ошибка при восстановлении дампа"; exit 1;
             }
             
@@ -138,12 +138,12 @@ jobs:
           else
             echo "→ Дамп не найден. Пропускаем восстановление."
           fi
-          sudo docker-compose up web -d
+          sudo docker compose up web -d
 
           echo "[*] Применение миграций Django..."
-          sudo docker-compose exec web python manage.py migrate
+          sudo docker compose exec web python manage.py migrate
     
           echo "[*] Сборка статики Django..."
-          sudo docker-compose exec web python manage.py collectstatic --noinput --clear
+          sudo docker compose exec web python manage.py collectstatic --noinput --clear
     
           echo "=== Деплой завершён успешно ==="

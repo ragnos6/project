@@ -79,15 +79,15 @@ jobs:
     
           echo "[*] Скачивание нового образа из Docker Hub..."
           echo "${{ secrets.DOCKERHUB_PASSWORD }}" | sudo docker login -u "${{ secrets.DOCKERHUB_USERNAME }}" --password-stdin
-          sudo docker-compose pull
+          sudo docker compose pull
     
           echo "[*] Запуск контейнеров в фоновом режиме..."
-          sudo docker-compose up -d
+          sudo docker compose up -d
     
           # Ожидание готовности базы данных
           echo "[*] Ожидание готовности базы данных (максимум 2 минуты)..."
           for i in {1..24}; do
-            if sudo docker-compose exec db pg_isready -U postgres; then
+            if sudo docker compose exec db pg_isready -U postgres; then
               echo "→ БД готова к подключению!"
               break
             fi
@@ -95,7 +95,7 @@ jobs:
             sleep 5
             if [ $i -eq 24 ]; then
               echo "[!] Ошибка: БД не запустилась вовремя"
-              sudo docker-compose logs db
+              sudo docker compose logs db
               exit 1
             fi
           done
@@ -105,10 +105,10 @@ jobs:
             echo "→ Найден дамп БД. Восстанавливаем..."
             
             export PGPASSWORD="Zhjl1905"
-            sudo docker-compose stop web
+            sudo docker compose stop web
           
             echo "→ Завершаем активные подключения к базе projectdb..."
-            sudo docker-compose exec -T db su postgres -c \
+            sudo docker compose exec -T db su postgres -c \
               "psql -d postgres -c \"
                 SELECT pg_terminate_backend(pid)
                 FROM pg_stat_activity

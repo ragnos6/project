@@ -104,7 +104,6 @@ jobs:
           if [ -f ~/project/backups/dump_1.sql ]; then
             echo "→ Найден дамп БД. Восстанавливаем..."
             
-            export PGPASSWORD="Zhjl1905"
             sudo docker compose stop web
           
             echo "→ Завершаем активные подключения к базе projectdb..."
@@ -134,7 +133,6 @@ jobs:
             
             echo "✓ База данных успешно восстановлена из дампа"
             # Очистим переменную
-            unset PGPASSWORD
           else
             echo "→ Дамп не найден. Пропускаем восстановление."
           fi

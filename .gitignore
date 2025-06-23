@@ -1,2 +1,5 @@
 .env
 id_rsa
+..env.swp
+.env.swp
+id_rsa.pub

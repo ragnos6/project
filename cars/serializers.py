@@ -9,7 +9,7 @@ class VehicleSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = Vehicle
-        fields = [  # Указываем нужные поля
+        fields = [ 
             'id',
             'local_purchase_date',
             'cost',

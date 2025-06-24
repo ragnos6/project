@@ -1,5 +1,5 @@
 from django.urls import path, include
-from .views import EnterpriseViewSet, VehicleViewSet, DriverViewSet, test, CustomAuthToken, ManagerLoginView, VehicleManageView, VehicleEditView, VehicleDeleteView, EnterpriseListView, TrackPointView, TripAPI, TripSummaryAPI, VehicleDetailView, export_data, import_data, report_api, reports_list, view_report, upload_trip
+from .views import EnterpriseViewSet, VehicleViewSet, DriverViewSet, CustomAuthToken, ManagerLoginView, VehicleManageView, VehicleEditView, VehicleDeleteView, EnterpriseListView, TrackPointView, TripAPI, TripSummaryAPI, VehicleDetailView, export_data, import_data, report_api, reports_list, view_report, upload_trip
 from rest_framework.routers import DefaultRouter
 
 

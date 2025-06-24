@@ -21,7 +21,8 @@ from .serializers import VehicleSerializer, EnterpriseSerializer, DriverSerializ
     TrackPointSerializer
 from .resources import EnterpriseResource, VehicleResource, TripResource
 from .pagination import CustomVehiclePagination
-from .services import TrackService, TripService, VehicleDetailService, ReportService, TripUploadService
+from .services import TrackService, TripService, VehicleDetailService, ReportService, TripUploadService, \
+    EnterpriseService, TripAPIService, ImportExportService, ReportFormService
 from .utils import generate_car_mileage_report, generate_driver_time_report, generate_enterprise_active_cars_report
 from rest_framework.response import Response
 from rest_framework.authtoken.views import ObtainAuthToken
@@ -65,22 +66,12 @@ class EnterpriseListView(ListView):
     context_object_name = 'enterprises'
 
     def get_queryset(self):
-        # Получение queryset из EnterpriseViewSet
-        viewset = EnterpriseViewSet()
-        viewset.request = self.request  # Передаём запрос
-        return viewset.get_queryset()
+        return EnterpriseService.get_enterprises_for_user(self.request.user)
+
 
     def post(self, request, *args, **kwargs):
-        # Обработка изменения таймзон для предприятий
-        for enterprise in self.get_queryset():
-            timezone_field = f"timezone_{enterprise.id}"
-            new_timezone = request.POST.get(timezone_field)
-            try:
-                enterprise.timezone = ZoneInfo(new_timezone)  # Проверка и сохранение
-                enterprise.save()
-            except (zoneinfo.ZoneInfoNotFoundError, ValueError):
-                pass  # Если таймзона некорректна, пропускаем
-        return redirect('cars:enterprises_list')  # Редирект на ту же страницу после изменений
+        EnterpriseService.update_timezones(self.get_queryset(), request.POST)
+        return redirect('cars:enterprises_list')
 
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
@@ -134,16 +125,7 @@ class DriverViewSet(viewsets.ModelViewSet):
         if hasattr(user, 'manager'):
             return Driver.objects.filter(enterprise__in=user.manager.enterprises.all())
         return Driver.objects.none()
-        
-        
-@csrf_protect
-def test(request):
-    if request.method == 'POST':
-        data = request.POST.get('data')
-        return JsonResponse({"message": "Данные получены", "data": data})
-    return render(request, 'test.html')
-    
-    
+
     # Для получения токена и ошибки, если введеные данные неверны, или пароль неверный
 class CustomAuthToken(ObtainAuthToken):
     def post(self, request, *args, **kwargs):
@@ -175,8 +157,12 @@ class ManagerLoginView(LoginView):
     def get_success_url(self):
         # После успешной авторизации перенаправляем на страницу доступных предприятий
         return reverse('cars:enterprises_list')
-        
-        
+
+
+class VehicleService:
+    pass
+
+
 class VehicleManageView(TemplateView):
     template_name = 'cars/manage_vehicles.html'
 
@@ -200,17 +186,21 @@ class VehicleManageView(TemplateView):
     def post(self, request, *args, **kwargs):
         enterprise_id = kwargs.get('enterprise_id')
         enterprise = get_object_or_404(Enterprise, id=enterprise_id)
-
         form = VehicleForm(request.POST)
+
         if form.is_valid():
-            vehicle = form.save(commit=False)
-            vehicle.enterprise = enterprise
-            vehicle.save()
-            return redirect('cars:manage_vehicles', enterprise_id=enterprise.id)
-        else:
-            context = self.get_context_data(**kwargs)
-            context['vehicle_form'] = form
-            return self.render_to_response(context)
+            try:
+                VehicleService.create_vehicle(
+                    form.cleaned_data,
+                    enterprise
+                )
+                return redirect('cars:manage_vehicles', enterprise_id=enterprise.id)
+            except Exception as e:
+                form.add_error(None, f"Ошибка при создании: {str(e)}")
+
+        context = self.get_context_data(**kwargs)
+        context['vehicle_form'] = form
+        return self.render_to_response(context)
             
 class VehicleEditView(UpdateView):
     model = Vehicle
@@ -244,52 +234,23 @@ class TrackPointView(APIView):
         
 class TripAPI(APIView):
     def get(self, request, vehicle_id):
-        # 1. Извлечение и валидация параметров запроса 'start' и 'end' как дат в формате ISO.
-        #    Если формат неверный или отсутствует, возвращаем ошибку.
         try:
             start_date = datetime.fromisoformat(request.query_params.get('start'))
             end_date = datetime.fromisoformat(request.query_params.get('end'))
         except (TypeError, ValueError):
             return Response(
-                {"error": "Некорректный формат 'start' или 'end'. Используйте ISO 8601 (например: 2023-01-01T12:00:00)."}, 
+                {"error": "Некорректный формат 'start' или 'end'. Используйте ISO 8601 (например: 2023-01-01T12:00:00)."},
                 status=status.HTTP_400_BAD_REQUEST
             )
 
-        # 2. Получение объекта транспортного средства по его идентификатору.
-        #    Если ТС не найдено, возвращаем ошибку.
         try:
-            vehicle = Vehicle.objects.get(id=vehicle_id)
-        except Vehicle.DoesNotExist:
-            return Response(
-                {"error": "Транспортное средство не найдено."}, 
-                status=status.HTTP_404_NOT_FOUND
-            )
-
-        # 3. Поиск маршрутов, которые полностью укладываются в заданный временной диапазон.
-        trips = Trip.objects.filter(
-            vehicle=vehicle,
-            start_time__gte=start_date,
-            end_time__lte=end_date
-        )
-
-        # 4. Если маршруты не найдены, возвращаем сообщение об их отсутствии.
-        if not trips.exists():
-            return Response(
-                ["За указанный промежуток времени маршруты не найдены."], 
-                status=status.HTTP_200_OK
-            )
-
-        # 5. Получение всех точек трека, соответствующих найденным маршрутам.
-        #    Формируем Q-объект для фильтрации точек по временным интервалам всех маршрутов.
-        trip_intervals = Q()
-        for trip in trips:
-            trip_intervals |= Q(timestamp__gte=trip.start_time, timestamp__lte=trip.end_time)
-
-        track_points = TrackPoint.objects.filter(Q(vehicle=vehicle) & trip_intervals)
-
-        # 6. Сериализация найденных точек трека и возврат их клиенту.
-        serializer = TrackPointSerializer(track_points, many=True)
-        return Response(serializer.data, status=status.HTTP_200_OK)
+            track_points = TripAPIService.get_trips_track_points(vehicle_id, start_date, end_date)
+            serializer = TrackPointSerializer(track_points, many=True)
+            return Response(serializer.data, status=status.HTTP_200_OK)
+        except NotFound as e:
+            return Response({"error": str(e)}, status=status.HTTP_404_NOT_FOUND)
+        except Exception as e:
+            return Response({"error": "Internal server error"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
 class TripSummaryAPI(APIView):
@@ -349,69 +310,29 @@ class VehicleDetailView(DetailView):
 
 # Экспорт данных предприятия
 def export_data(request):
-    print("DEBUG: export_data called with GET:", request.GET)
-
     enterprise_id = request.GET.get('enterprise_id')
     start_str = request.GET.get('start')
     end_str = request.GET.get('end')
     file_format = request.GET.get('file_format', 'json')
 
-    enterprise = get_object_or_404(Enterprise, pk=enterprise_id)
+    try:
+        ent_dataset, veh_dataset, trip_dataset, file_format = ImportExportService.export_data(
+            enterprise_id, start_str, end_str, file_format
+        )
+        response, filename = ImportExportService.handle_export_response(
+            ent_dataset, veh_dataset, trip_dataset, file_format
+        )
 
-    # Парсим даты
-    date_format = "%Y-%m-%d"
-    start_date = datetime.strptime(start_str, date_format) if start_str else None
-    end_date = datetime.strptime(end_str, date_format) if end_str else None
+        if isinstance(response, HttpResponse):
+            response['Content-Disposition'] = f'attachment; filename="{filename}"'
+            return response
+        else:
+            response = FileResponse(response, content_type='application/zip')
+            response['Content-Disposition'] = f'attachment; filename="{filename}"'
+            return response
 
-    # Готовим queryset
-    enterprise_qs = Enterprise.objects.filter(id=enterprise.id)
-    vehicles_qs = Vehicle.objects.filter(enterprise=enterprise)
-    trips_qs = Trip.objects.filter(vehicle__enterprise=enterprise)
-
-    # Если передан диапазон, фильтруем Trips
-    if start_date and end_date:
-        trips_qs = trips_qs.filter(start_time__gte=start_date, end_time__lte=end_date)
-
-    # Создаём ресурсы
-    ent_res = EnterpriseResource()
-    veh_res = VehicleResource()
-    trip_res = TripResource()
-
-    # Экспортируем
-    ent_dataset = ent_res.export(enterprise_qs)
-    veh_dataset = veh_res.export(vehicles_qs)
-    trip_dataset = trip_res.export(trips_qs)
-
-    # Выдаем JSON
-    if file_format == 'json':
-        book = Databook()
-        ent_dataset.title = "Enterprise"
-        veh_dataset.title = "Vehicle"
-        trip_dataset.title = "Trip"
-        book.add_sheet(ent_dataset)
-        book.add_sheet(veh_dataset)
-        book.add_sheet(trip_dataset)
-        # Получаем одну строку JSON
-        json_data = book.json
-        response = HttpResponse(json_data, content_type='application/json; charset=utf-8')
-        response['Content-Disposition'] = 'attachment; filename="export.json"'
-        return response
-    else:
-        # CSV -> делаем zip с тремя файлами
-        ent_csv = ent_dataset.csv
-        veh_csv = veh_dataset.csv
-        trip_csv = trip_dataset.csv
-
-        memory_file = io.BytesIO()
-        with zipfile.ZipFile(memory_file, 'w', zipfile.ZIP_DEFLATED) as zf:
-            zf.writestr("enterprise.csv", ent_csv)
-            zf.writestr("vehicles.csv", veh_csv)
-            zf.writestr("trips.csv", trip_csv)
-
-        memory_file.seek(0)
-        response = FileResponse(memory_file, content_type='application/zip')
-        response['Content-Disposition'] = 'attachment; filename="export_csv.zip"'
-        return response
+    except Exception as e:
+        return HttpResponse(f"Ошибка при экспорте: {str(e)}", status=500)
         
 # Импорт данных по предприятию
 def import_data(request):
@@ -420,103 +341,22 @@ def import_data(request):
         if not file:
             return HttpResponse("Файл не выбран", status=400)
 
-        # Определяем тип
-        fn = file.name.lower()
-        if fn.endswith('.json'):
-            return _import_json(file)
-        elif fn.endswith('.zip'):
-            return _import_csv_zip(file)
-        else:
-            return HttpResponse("Неподдерживаемый формат (ожидается .json или .zip)", status=400)
-    else:
-        return HttpResponse("Используйте POST", status=405)
+        try:
+            fn = file.name.lower()
+            if fn.endswith('.json'):
+                ImportExportService.import_json(file)
+            elif fn.endswith('.zip'):
+                ImportExportService.import_csv_zip(file)
+            else:
+                return HttpResponse("Неподдерживаемый формат", status=400)
 
-def _import_json(file):
-    from .resources import EnterpriseResource, VehicleResource, TripResource
-    from tablib import Databook
+            return HttpResponse("Импорт данных завершён")
+        except ValidationError as e:
+            return HttpResponse(str(e), status=400)
+        except Exception as e:
+            return HttpResponse(f"Ошибка при импорте: {str(e)}", status=500)
 
-    content = file.read().decode('utf-8')
-    try:
-        book = Databook()
-        book.json = content  # загружаем из JSON
-    except Exception as e:
-        return HttpResponse(f"Ошибка при чтении JSON: {e}", status=400)
-
-    # book должен иметь sheets: Enterprise, Vehicle, Trip
-    sheets = {sheet.title: sheet for sheet in book.sheets()}
-
-    ent_res = EnterpriseResource()
-    veh_res = VehicleResource()
-    trip_res = TripResource()
-
-    # 1. Enterprise
-    ent_sheet = sheets.get("Enterprise")
-    if ent_sheet:
-        result_ent = ent_res.import_data(ent_sheet, dry_run=True)
-        if result_ent.has_errors():
-            return HttpResponse(f"Ошибки при импорте Enterprise: {result_ent.row_errors()}", status=400)
-        ent_res.import_data(ent_sheet, dry_run=False)
-
-    # 2. Vehicle
-    veh_sheet = sheets.get("Vehicle")
-    if veh_sheet:
-        result_veh = veh_res.import_data(veh_sheet, dry_run=True)
-        if result_veh.has_errors():
-            return HttpResponse(f"Ошибки при импорте Vehicles: {result_veh.row_errors()}", status=400)
-        veh_res.import_data(veh_sheet, dry_run=False)
-
-    # 3. Trip
-    trip_sheet = sheets.get("Trip")
-    if trip_sheet:
-        result_trip = trip_res.import_data(trip_sheet, dry_run=True)
-        if result_trip.has_errors():
-            return HttpResponse(f"Ошибки при импорте Trips: {result_trip.row_errors()}", status=400)
-        trip_res.import_data(trip_sheet, dry_run=False)
-
-    return HttpResponse("Импорт JSON завершён")
-
-def _import_csv_zip(file):
-    import zipfile
-    from .resources import EnterpriseResource, VehicleResource, TripResource
-
-    if not zipfile.is_zipfile(file):
-        return HttpResponse("Загруженный файл не является ZIP", status=400)
-
-    with zipfile.ZipFile(file, 'r') as zf:
-        # Проверим, есть ли наши файлы
-        needed_files = {"enterprise.csv", "vehicles.csv", "trips.csv"}
-        files_in_zip = set(zf.namelist())
-        if not needed_files.issubset(files_in_zip):
-            return HttpResponse(f"Необходимые CSV-файлы не найдены: {needed_files - files_in_zip}", status=400)
-
-        ent_csv = zf.read("enterprise.csv").decode('utf-8')
-        veh_csv = zf.read("vehicles.csv").decode('utf-8')
-        trip_csv = zf.read("trips.csv").decode('utf-8')
-
-        ent_res = EnterpriseResource()
-        veh_res = VehicleResource()
-        trip_res = TripResource()
-
-        # Enterprise
-        result_ent = ent_res.import_data(ent_csv, format='csv', dry_run=True)
-        if result_ent.has_errors():
-            return HttpResponse(f"Ошибки при импорте Enterprise: {result_ent.row_errors()}", status=400)
-        ent_res.import_data(ent_csv, format='csv', dry_run=False)
-
-        # Vehicles
-        result_veh = veh_res.import_data(veh_csv, format='csv', dry_run=True)
-        if result_veh.has_errors():
-            return HttpResponse(f"Ошибки при импорте Vehicles: {result_veh.row_errors()}", status=400)
-        veh_res.import_data(veh_csv, format='csv', dry_run=False)
-
-        # Trips
-        result_trip = trip_res.import_data(trip_csv, format='csv', dry_run=True)
-        if result_trip.has_errors():
-            return HttpResponse(f"Ошибки при импорте Trips: {result_trip.row_errors()}", status=400)
-        trip_res.import_data(trip_csv, format='csv', dry_run=False)
-
-    return HttpResponse("Импорт CSV (ZIP) завершён")
-
+    return HttpResponse("Используйте POST", status=405)
 
 @api_view(['GET'])
 def report_api(request):
@@ -541,28 +381,13 @@ def reports_list(request):
     if request.method == 'POST':
         form = ReportForm(request.POST)
         if form.is_valid():
-            report_type = form.cleaned_data['report_type']
-            period = form.cleaned_data['period']
-            start_date = form.cleaned_data['start_date']
-            end_date = form.cleaned_data['end_date']
-
             try:
-                if report_type == 'car_mileage':
-                    vehicle = form.cleaned_data['vehicle']
-                    report = generate_car_mileage_report(vehicle.id, start_date, end_date, period)
-                elif report_type == 'driver_time':
-                    driver = form.cleaned_data['driver']
-                    report = generate_driver_time_report(driver.id, start_date, end_date, period)
-                elif report_type == 'enterprise_active_cars':
-                    enterprise = form.cleaned_data['enterprise']
-                    report = generate_enterprise_active_cars_report(enterprise.id, start_date, end_date, period)
-                else:
-                    messages.error(request, "Неизвестный тип отчёта.")
-                    return redirect('cars:reports_list')
-
+                # Используем сервис для создания отчета
+                report = ReportFormService.create_report(form.cleaned_data)
                 messages.success(request, f"Отчёт '{report.name}' успешно создан.")
                 return redirect('cars:reports_list')
-
+            except ValueError as e:
+                messages.error(request, str(e))
             except Exception as e:
                 messages.error(request, f"Ошибка при создании отчёта: {str(e)}")
         else:
@@ -570,12 +395,8 @@ def reports_list(request):
     else:
         form = ReportForm()
 
-    reports = Report.objects.all().order_by('-created_at')  # Сортировка по убыванию даты создания
-    context = {
-        'form': form,
-        'reports': reports,
-    }
-
+    reports = Report.objects.all().order_by('-created_at')
+    context = {'form': form, 'reports': reports}
     return render(request, 'cars/reports_list.html', context)
     
     

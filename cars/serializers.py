@@ -70,3 +70,8 @@ class TrackPointSerializer(serializers.ModelSerializer):
         local_time = enterprise.to_local_time(obj.timestamp)
         return local_time.isoformat()
 
+class TrackPointRequestSerializer(serializers.Serializer):
+    vehicle_id = serializers.IntegerField()
+    start_time = serializers.DateTimeField()
+    end_time = serializers.DateTimeField()
+    output_format = serializers.ChoiceField(choices=["json", "geojson"])

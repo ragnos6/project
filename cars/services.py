@@ -1,4 +1,5 @@
-from typing import List
+import zoneinfo
+from typing import List, io
 from zoneinfo import ZoneInfo
 from django.contrib.gis.geos import Point
 from django.db.models import Q
@@ -7,8 +8,10 @@ from django.core.exceptions import ValidationError
 from datetime import datetime, timedelta
 
 from django.utils.dateparse import parse_datetime
+from tablib import Databook
 
 from .models import Vehicle, Enterprise, Trip, TrackPoint, Driver
+from .resources import EnterpriseResource, VehicleResource, TripResource
 from .utils import generate_car_mileage_report, generate_driver_time_report, generate_enterprise_active_cars_report, \
     get_address_for_point
 from .dto import TrackPointRequestDTO, TrackPointResponseDTO, TripSummaryRequestDTO, TripSummaryDTO, VehicleDetailDTO, \
@@ -229,6 +232,8 @@ class VehicleDetailService:
 class ReportService:
     @staticmethod
     def generate_report(dto: ReportRequestDTO) -> dict:
+        if not dto.start_date or not dto.end_date:
+            return {"error": "Не указаны даты начала или окончания периода"}
         try:
             start_date = datetime.strptime(dto.start_date, '%Y-%m-%d').date()
             end_date = datetime.strptime(dto.end_date, '%Y-%m-%d').date()
@@ -316,3 +321,191 @@ class TripUploadService:
             TrackPoint.objects.bulk_create(track_points_objects)
 
         return trip
+
+class TripAPIService:
+    @staticmethod
+    def get_trips_track_points(vehicle_id, start_date, end_date):
+        try:
+            vehicle = Vehicle.objects.get(id=vehicle_id)
+        except Vehicle.DoesNotExist:
+            raise NotFound("Транспортное средство не найдено")
+
+        trips = Trip.objects.filter(
+            vehicle=vehicle,
+            start_time__gte=start_date,
+            end_time__lte=end_date
+        )
+
+        if not trips.exists():
+            return []
+
+        trip_intervals = Q()
+        for trip in trips:
+            trip_intervals |= Q(timestamp__gte=trip.start_time, timestamp__lte=trip.end_time)
+
+        return TrackPoint.objects.filter(Q(vehicle=vehicle) & trip_intervals)
+
+
+class ImportExportService:
+    @staticmethod
+    def export_data(enterprise_id, start_str, end_str, file_format):
+        enterprise = Enterprise.objects.get(pk=enterprise_id)
+
+        # Парсим даты
+        date_format = "%Y-%m-%d"
+        start_date = datetime.strptime(start_str, date_format) if start_str else None
+        end_date = datetime.strptime(end_str, date_format) if end_str else None
+
+        # Готовим queryset
+        enterprise_qs = Enterprise.objects.filter(id=enterprise.id)
+        vehicles_qs = Vehicle.objects.filter(enterprise=enterprise)
+        trips_qs = Trip.objects.filter(vehicle__enterprise=enterprise)
+
+        if start_date and end_date:
+            trips_qs = trips_qs.filter(start_time__gte=start_date, end_time__lte=end_date)
+
+        # Создаём ресурсы
+        ent_res = EnterpriseResource()
+        veh_res = VehicleResource()
+        trip_res = TripResource()
+
+        # Экспортируем
+        ent_dataset = ent_res.export(enterprise_qs)
+        veh_dataset = veh_res.export(vehicles_qs)
+        trip_dataset = trip_res.export(trips_qs)
+
+        return ent_dataset, veh_dataset, trip_dataset, file_format
+
+    @staticmethod
+    def handle_export_response(ent_dataset, veh_dataset, trip_dataset, file_format):
+        if file_format == 'json':
+            book = Databook()
+            ent_dataset.title = "Enterprise"
+            veh_dataset.title = "Vehicle"
+            trip_dataset.title = "Trip"
+            book.add_sheet(ent_dataset)
+            book.add_sheet(veh_dataset)
+            book.add_sheet(trip_dataset)
+            json_data = book.json
+            return HttpResponse(json_data, content_type='application/json; charset=utf-8'), 'export.json'
+        else:
+            ent_csv = ent_dataset.csv
+            veh_csv = veh_dataset.csv
+            trip_csv = trip_dataset.csv
+
+            memory_file = io.BytesIO()
+            with zipfile.ZipFile(memory_file, 'w', zipfile.ZIP_DEFLATED) as zf:
+                zf.writestr("enterprise.csv", ent_csv)
+                zf.writestr("vehicles.csv", veh_csv)
+                zf.writestr("trips.csv", trip_csv)
+
+            memory_file.seek(0)
+            return memory_file, 'export_csv.zip'
+
+    @staticmethod
+    def import_json(file):
+        content = file.read().decode('utf-8')
+        book = Databook()
+        book.json = content
+        sheets = {sheet.title: sheet for sheet in book.sheets()}
+
+        ent_res = EnterpriseResource()
+        veh_res = VehicleResource()
+        trip_res = TripResource()
+
+        # 1. Enterprise
+        if ent_sheet := sheets.get("Enterprise"):
+            ent_res.import_data(ent_sheet, dry_run=False)
+
+        # 2. Vehicle
+        if veh_sheet := sheets.get("Vehicle"):
+            veh_res.import_data(veh_sheet, dry_run=False)
+
+        # 3. Trip
+        if trip_sheet := sheets.get("Trip"):
+            trip_res.import_data(trip_sheet, dry_run=False)
+
+    @staticmethod
+    def import_csv_zip(file):
+        with zipfile.ZipFile(file, 'r') as zf:
+            needed_files = {"enterprise.csv", "vehicles.csv", "trips.csv"}
+            files_in_zip = set(zf.namelist())
+            if not needed_files.issubset(files_in_zip):
+                raise ValidationError(f"Необходимые CSV-файлы не найдены: {needed_files - files_in_zip}")
+
+            ent_csv = zf.read("enterprise.csv").decode('utf-8')
+            veh_csv = zf.read("vehicles.csv").decode('utf-8')
+            trip_csv = zf.read("trips.csv").decode('utf-8')
+
+            ent_res = EnterpriseResource()
+            veh_res = VehicleResource()
+            trip_res = TripResource()
+
+            ent_res.import_data(ent_csv, format='csv', dry_run=False)
+            veh_res.import_data(veh_csv, format='csv', dry_run=False)
+            trip_res.import_data(trip_csv, format='csv', dry_run=False)
+
+
+class ReportFormService:
+    @staticmethod
+    def create_report(form_data):
+        report_type = form_data['report_type']
+        period = form_data['period']
+        start_date = form_data['start_date']
+        end_date = form_data['end_date']
+
+        if report_type == 'car_mileage':
+            return generate_car_mileage_report(
+                form_data['vehicle'].id,
+                start_date,
+                end_date,
+                period
+            )
+        elif report_type == 'driver_time':
+            return generate_driver_time_report(
+                form_data['driver'].id,
+                start_date,
+                end_date,
+                period
+            )
+        elif report_type == 'enterprise_active_cars':
+            return generate_enterprise_active_cars_report(
+                form_data['enterprise'].id,
+                start_date,
+                end_date,
+                period
+            )
+        raise ValueError("Неизвестный тип отчёта")
+
+
+class EnterpriseService:
+    @staticmethod
+    def update_timezones(queryset, post_data):
+        for enterprise in queryset:
+            timezone_field = f"timezone_{enterprise.id}"
+            if new_timezone := post_data.get(timezone_field):
+                try:
+                    enterprise.timezone = ZoneInfo(new_timezone)
+                    enterprise.save()
+                except (zoneinfo.ZoneInfoNotFoundError, ValueError):
+                    pass
+    @staticmethod
+    def get_enterprises_for_user(user):
+        if user.is_superuser:
+            return Enterprise.objects.all()
+        if hasattr(user, 'manager'):
+            return Enterprise.objects.filter(managers=user.manager)
+        return Enterprise.objects.none()
+
+class VehicleService:
+    @staticmethod
+    def create_vehicle(form_data, enterprise):
+        vehicle = Vehicle(
+            model=form_data['model'],
+            license_plate=form_data['license_plate'],
+            # ... другие поля ...
+            enterprise=enterprise
+        )
+        vehicle.full_clean()  # Валидация модели
+        vehicle.save()
+        return vehicle

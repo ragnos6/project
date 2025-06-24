@@ -4,7 +4,7 @@ from zoneinfo import ZoneInfo
 from django.contrib.gis.geos import Point
 from django.db.models import Q
 from django.utils import timezone
-from django.core.exceptions import ValidationError
+from django.core.exceptions import ValidationError, PermissionDenied
 from datetime import datetime, timedelta
 
 from django.utils.dateparse import parse_datetime
@@ -497,6 +497,7 @@ class EnterpriseService:
             return Enterprise.objects.filter(managers=user.manager)
         return Enterprise.objects.none()
 
+
 class VehicleService:
     @staticmethod
     def create_vehicle(form_data, enterprise):
@@ -509,3 +510,22 @@ class VehicleService:
         vehicle.full_clean()  # Валидация модели
         vehicle.save()
         return vehicle
+    @staticmethod
+    def get_vehicles_for_user(user):
+        if user.is_superuser:
+            return Vehicle.objects.all()
+        if hasattr(user, 'manager'):
+            return Vehicle.objects.filter(enterprise__in=user.manager.enterprises.all())
+        return Vehicle.objects.none()
+    @staticmethod
+    def get_vehicle_for_user(user, pk):
+        try:
+            vehicle = Vehicle.objects.get(pk=pk)
+        except Vehicle.DoesNotExist:
+            raise PermissionDenied("ACCESS DENIED")
+        # Проверка доступа
+        if user.is_superuser:
+            return vehicle
+        if hasattr(user, 'manager') and vehicle.enterprise in user.manager.enterprises.all():
+            return vehicle
+        raise PermissionDenied("ACCESS DENIED")

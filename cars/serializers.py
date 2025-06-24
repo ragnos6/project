@@ -75,3 +75,11 @@ class TrackPointRequestSerializer(serializers.Serializer):
     start_time = serializers.DateTimeField()
     end_time = serializers.DateTimeField()
     output_format = serializers.ChoiceField(choices=["json", "geojson"])
+
+class TripAPIRequestSerializer(serializers.Serializer):
+    start = serializers.DateTimeField()
+    end = serializers.DateTimeField()
+
+class TripSummaryRequestSerializer(serializers.Serializer):
+    start = serializers.DateTimeField()
+    end = serializers.DateTimeField()

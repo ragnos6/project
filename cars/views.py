@@ -18,7 +18,7 @@ from .permissions import IsManagerOrReadOnly
 from .forms import ManagerLoginForm, VehicleForm, ReportForm, TripUploadForm
 from .models import Vehicle, Enterprise, Driver, TrackPoint, Trip, Report
 from .serializers import VehicleSerializer, EnterpriseSerializer, DriverSerializer, CustomAuthTokenSerializer, \
-    TrackPointSerializer
+    TrackPointSerializer, TripAPIRequestSerializer, TripSummaryRequestSerializer
 from .resources import EnterpriseResource, VehicleResource, TripResource
 from .pagination import CustomVehiclePagination
 from .services import TrackService, TripService, VehicleDetailService, ReportService, TripUploadService, \
@@ -48,17 +48,7 @@ class EnterpriseViewSet(viewsets.ModelViewSet):
     permission_classes = [IsManagerOrReadOnly]
     #
     def get_queryset(self):
-        user = self.request.user
-        
-        # Если пользователь — суперпользователь, возвращаем все предприятия
-        if user.is_superuser:
-            return Enterprise.objects.all()
-            
-        # Если пользователь - менеджер, возвращаем только доступные предприятия
-        if hasattr(user, 'manager'):
-            return Enterprise.objects.filter(managers=user.manager)
-        return Enterprise.objects.none()  # Пустой список для других пользователей
-
+        return EnterpriseService.get_enterprises_for_user(self.request.user)
 
 class EnterpriseListView(ListView):
     model = Enterprise
@@ -86,29 +76,11 @@ class VehicleViewSet(viewsets.ModelViewSet):
     pagination_class = CustomVehiclePagination
 
     def get_queryset(self):
-        user = self.request.user
+        return VehicleService.get_vehicles_for_user(self.request.user)
 
-        # Фильтруем машины по предприятиям, доступным менеджеру
-        if hasattr(user, 'manager'):
-            return Vehicle.objects.filter(enterprise__in=user.manager.enterprises.all())
-
-        # Если пользователь не менеджер, возвращаем пустой QuerySet
-        return Vehicle.objects.none()
 
     def get_object(self):
-        user = self.request.user
-        
-        try:
-            obj = Vehicle.objects.get(pk=self.kwargs['pk'])
-        except Vehicle.DoesNotExist:
-            # Возвращаем 403, если автомобиль не найден
-            raise PermissionDenied("ACCESS DENIED")
-
-        # Проверка доступа для менеджера
-        if hasattr(user, 'manager') and obj.enterprise not in user.manager.enterprises.all():
-            raise PermissionDenied("ACCESS DENIED")
-        
-        return obj
+        return VehicleService.get_vehicle_for_user(self.request.user, pk=self.kwargs['pk'])
 
 
 class DriverViewSet(viewsets.ModelViewSet):
@@ -234,27 +206,26 @@ class TrackPointView(APIView):
         
 class TripAPI(APIView):
     def get(self, request, vehicle_id):
-        try:
-            start_date = datetime.fromisoformat(request.query_params.get('start'))
-            end_date = datetime.fromisoformat(request.query_params.get('end'))
-        except (TypeError, ValueError):
-            return Response(
-                {"error": "Некорректный формат 'start' или 'end'. Используйте ISO 8601 (например: 2023-01-01T12:00:00)."},
-                status=status.HTTP_400_BAD_REQUEST
-            )
+        serializer = TripAPIRequestSerializer(data=request.query_params)
+        serializer.is_valid(raise_exception=True)
+        start_date = serializer.validated_data['start']
+        end_date = serializer.validated_data['end']
 
         try:
             track_points = TripAPIService.get_trips_track_points(vehicle_id, start_date, end_date)
-            serializer = TrackPointSerializer(track_points, many=True)
-            return Response(serializer.data, status=status.HTTP_200_OK)
+            serializer_tp = TrackPointSerializer(track_points, many=True)
+            return Response(serializer_tp.data, status=status.HTTP_200_OK)
         except NotFound as e:
             return Response({"error": str(e)}, status=status.HTTP_404_NOT_FOUND)
-        except Exception as e:
+        except Exception:
             return Response({"error": "Internal server error"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
 
 
 class TripSummaryAPI(APIView):
     def get(self, request, vehicle_id):
+        serializer = TripSummaryRequestSerializer(data=request.query_params)
+        serializer.is_valid(raise_exception=True)
         dto = TripSummaryRequestDTO(
             vehicle_id=vehicle_id,
             start_time=request.query_params.get('start'),
@@ -277,7 +248,7 @@ class TripSummaryAPI(APIView):
             return Response(result_data, status=status.HTTP_200_OK)
         except ValidationError as e:
             return Response({'error': str(e)}, status=status.HTTP_400_BAD_REQUEST)
-        except Exception as e:
+        except Exception:
             return Response({'error': 'Internal server error'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 

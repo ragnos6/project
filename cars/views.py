@@ -4,6 +4,7 @@ import json
 import io
 import zipfile
 from django.contrib import messages
+from django.contrib.auth.mixins import LoginRequiredMixin
 from django.contrib.gis.geos import Point
 from django.shortcuts import render, get_object_or_404, redirect
 from django.contrib.auth.views import LoginView
@@ -135,7 +136,7 @@ class VehicleService:
     pass
 
 
-class VehicleManageView(TemplateView):
+class VehicleManageView(LoginRequiredMixin, TemplateView):
     template_name = 'cars/manage_vehicles.html'
 
     def get_context_data(self, **kwargs):
@@ -154,7 +155,6 @@ class VehicleManageView(TemplateView):
         context['vehicle_form'] = VehicleForm()
         return context
 
-    @login_required()
     def post(self, request, *args, **kwargs):
         enterprise_id = kwargs.get('enterprise_id')
         enterprise = get_object_or_404(Enterprise, id=enterprise_id)

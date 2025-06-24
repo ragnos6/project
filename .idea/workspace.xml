@@ -5,10 +5,10 @@
   </component>
   <component name="ChangeListManager">
     <list default="true" id="9a9feb0d-3349-4d4e-a95a-be1ed55b9735" name="Changes" comment="Update 23.06">
-      <change afterPath="$PROJECT_DIR$/cars/services.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/.idea/misc.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/misc.xml" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/.idea/project.iml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/project.iml" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/cars/dto.py" beforeDir="false" afterPath="$PROJECT_DIR$/cars/dto.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/cars/services.py" beforeDir="false" afterPath="$PROJECT_DIR$/cars/services.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/cars/views.py" beforeDir="false" afterPath="$PROJECT_DIR$/cars/views.py" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
@@ -123,9 +123,17 @@
       <option name="number" value="Default" />
       <option name="presentableId" value="Default" />
       <updated>1750782854199</updated>
-      <workItem from="1750782856540" duration="1306000" />
+      <workItem from="1750782856540" duration="3268000" />
     </task>
-    <option name="localTasksCounter" value="3" />
+    <task id="LOCAL-00003" summary="Update 23.06">
+      <option name="closed" value="true" />
+      <created>1750784847602</created>
+      <option name="number" value="00003" />
+      <option name="presentableId" value="LOCAL-00003" />
+      <option name="project" value="LOCAL" />
+      <updated>1750784847602</updated>
+    </task>
+    <option name="localTasksCounter" value="4" />
     <servers />
   </component>
   <component name="TypeScriptGeneratedFilesManager">

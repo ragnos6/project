@@ -3,6 +3,7 @@ import os
 import json
 import io
 import zipfile
+import gpxpy
 from django.contrib import messages
 from django.contrib.gis.geos import Point
 from django.shortcuts import render, get_object_or_404, redirect
@@ -13,7 +14,6 @@ from django.views.generic.edit import UpdateView, DeleteView
 from django.urls import reverse_lazy
 from rest_framework import viewsets, status
 from rest_framework.views import APIView
-from .dto import TrackPointRequestDTO, TripSummaryRequestDTO, VehicleDetailDTO, ReportRequestDTO, TripUploadDTO
 from .permissions import IsManagerOrReadOnly
 from .forms import ManagerLoginForm, VehicleForm, ReportForm, TripUploadForm
 from .models import Vehicle, Enterprise, Driver, TrackPoint, Trip, Report
@@ -21,8 +21,7 @@ from .serializers import VehicleSerializer, EnterpriseSerializer, DriverSerializ
     TrackPointSerializer
 from .resources import EnterpriseResource, VehicleResource, TripResource
 from .pagination import CustomVehiclePagination
-from .services import TrackService, TripService, VehicleDetailService, ReportService, TripUploadService
-from .utils import generate_car_mileage_report, generate_driver_time_report, generate_enterprise_active_cars_report
+from .utils import get_address_for_point, generate_car_mileage_report, generate_driver_time_report, generate_enterprise_active_cars_report
 from rest_framework.response import Response
 from rest_framework.authtoken.views import ObtainAuthToken
 from rest_framework.authtoken.models import Token
@@ -226,20 +225,69 @@ class VehicleDeleteView(DeleteView):
 
 class TrackPointView(APIView):
     def get(self, request, vehicle_id):
-        dto = TrackPointRequestDTO(
-            vehicle_id=vehicle_id,
-            start_time=request.query_params.get('start_time'),
-            end_time=request.query_params.get('end_time'),
-            output_format=request.query_params.get('f', 'json')
+        # Получение автомобиля
+        try:
+            vehicle = Vehicle.objects.select_related('enterprise').get(id=vehicle_id)
+        except Vehicle.DoesNotExist:
+            raise NotFound("Vehicle not found")
+
+        # Получение предприятия и часовой зоны
+        enterprise = vehicle.enterprise
+        local_tz = ZoneInfo(enterprise.timezone)
+
+        # Параметры диапазона времени
+        start_time = request.query_params.get('start_time')
+        end_time = request.query_params.get('end_time')
+        output_format = request.query_params.get('f')
+
+        if output_format not in ['json', 'geojson']:
+            return Response({'error': 'Invalid format request'}, status=status.HTTP_400_BAD_REQUEST)
+
+        if not start_time or not end_time:
+            raise ValidationError("Both 'start_time' and 'end_time' are required.")
+
+        # Парсинг временных меток и перевод их в UTC
+        try:
+            start_time = parse_datetime(start_time).astimezone(ZoneInfo("UTC"))
+            end_time = parse_datetime(end_time).astimezone(ZoneInfo("UTC"))
+        except Exception as e:
+            raise ValidationError(f"Invalid date format: {e}")
+
+        # Фильтрация точек трека
+        tracks = TrackPoint.objects.filter(
+            vehicle=vehicle,
+            timestamp__range=(start_time, end_time)
         )
 
-        try:
-            result = TrackService.get_track_points(dto)
-            return Response(result.data, status=status.HTTP_200_OK)
-        except ValidationError as e:
-            return Response({'error': str(e)}, status=status.HTTP_400_BAD_REQUEST)
-        except Exception as e:
-            return Response({'error': 'Internal server error'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+        if output_format == "geojson":
+            # Возвращаем GeoJSON
+            track_data = {
+                "type": "FeatureCollection",
+                "features": [
+                    {
+                        "type": "Feature",
+                        "geometry": {
+                            "type": "Point",
+                            "coordinates": track.location.coords
+                        },
+                        "properties": {
+                            "timestamp": track.timestamp.astimezone(local_tz).isoformat()
+                        }
+                    }
+                    for track in tracks
+                ]
+            }
+        else:
+            # Возвращаем обычный JSON
+            track_data = [
+                {
+                    "location": track.location.coords,
+                    "timestamp": track.timestamp.astimezone(local_tz).isoformat(),
+                }
+                for track in tracks
+            ]
+
+        return Response(track_data)
         
         
 class TripAPI(APIView):
@@ -290,60 +338,230 @@ class TripAPI(APIView):
         # 6. Сериализация найденных точек трека и возврат их клиенту.
         serializer = TrackPointSerializer(track_points, many=True)
         return Response(serializer.data, status=status.HTTP_200_OK)
-
-
+        
+       
 class TripSummaryAPI(APIView):
     def get(self, request, vehicle_id):
-        dto = TripSummaryRequestDTO(
-            vehicle_id=vehicle_id,
-            start_time=request.query_params.get('start'),
-            end_time=request.query_params.get('end')
+        # 1. Извлекаем параметры, считаем, что они в локальном времени предприятия
+        try:
+            local_start = datetime.fromisoformat(request.query_params.get('start'))  # наивный datetime
+            local_end = datetime.fromisoformat(request.query_params.get('end'))      # наивный datetime
+        except (TypeError, ValueError):
+            return Response(
+                {"error": "Некорректный формат 'start' или 'end'. Используйте ISO 8601 (например: 2023-01-01T12:00:00)."},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        # 2. Получаем ТС
+        try:
+            vehicle = Vehicle.objects.get(id=vehicle_id)
+        except Vehicle.DoesNotExist:
+            return Response(
+                {"error": "Транспортное средство не найдено."}, 
+                status=status.HTTP_404_NOT_FOUND
+            )
+
+        enterprise = vehicle.enterprise
+        # Присваиваем таймзону предприятия входным датам
+        local_tz = ZoneInfo(enterprise.timezone)
+        local_start = local_start.replace(tzinfo=local_tz)
+        local_end = local_end.replace(tzinfo=local_tz)
+
+        # Переводим локальное время в UTC
+        start_date_utc = local_start.astimezone(ZoneInfo("UTC"))
+        end_date_utc = local_end.astimezone(ZoneInfo("UTC"))
+
+        # 3. Фильтруем поездки по указанному интервалу
+        trips = Trip.objects.filter(
+            vehicle=vehicle,
+            start_time__gte=start_date_utc,
+            end_time__lte=end_date_utc
         )
 
-        try:
-            result = TripService.get_trip_summary(dto)
-            # Преобразуем DTO в словари для сериализации
-            result_data = [{
-                "start_time_local": item.start_time_local,
-                "end_time_local": item.end_time_local,
-                "duration": item.duration,
-                "start_location": item.start_location,
-                "start_address": item.start_address,
-                "end_location": item.end_location,
-                "end_address": item.end_address
-            } for item in result]
+        if not trips.exists():
+            return Response(
+                ["Поездки за указанный период не найдены."], 
+                status=status.HTTP_200_OK
+            )
 
-            return Response(result_data, status=status.HTTP_200_OK)
-        except ValidationError as e:
-            return Response({'error': str(e)}, status=status.HTTP_400_BAD_REQUEST)
-        except Exception as e:
-            return Response({'error': 'Internal server error'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+        result = []
+        for trip in trips:
+            # Получаем точки трека, чтобы определить начальную и конечную локацию
+            track_points = TrackPoint.objects.filter(
+                vehicle=vehicle,
+                timestamp__gte=trip.start_time,
+                timestamp__lte=trip.end_time
+            ).order_by('timestamp')
+
+            if track_points.exists():
+                start_point = track_points.first()
+                end_point = track_points.last()
+                start_address = get_address_for_point(start_point.location)
+                end_address = get_address_for_point(end_point.location)
+
+                # Преобразуем время старта/окончания поездки в локальное время для вывода
+                local_start_time = enterprise.to_local_time(trip.start_time)
+                local_end_time = enterprise.to_local_time(trip.end_time)
+
+                result.append({
+                    "start_time_local": local_start_time.isoformat(),
+                    "end_time_local": local_end_time.isoformat(),
+                    "duration": str(trip.duration) if trip.duration else None,
+                    "start_location": [start_point.location.y, start_point.location.x],
+                    "start_address": start_address,
+                    "end_location": [end_point.location.y, end_point.location.x],
+                    "end_address": end_address
+                })
+            else:
+                # Если нет точек трека, укажем только время без локаций
+                local_start_time = enterprise.to_local_time(trip.start_time)
+                local_end_time = enterprise.to_local_time(trip.end_time)
+                result.append({
+                    "start_time_local": local_start_time.isoformat(),
+                    "end_time_local": local_end_time.isoformat(),
+                    "duration": str(trip.duration) if trip.duration else None,
+                    "start_location": None,
+                    "start_address": None,
+                    "end_location": None,
+                    "end_address": None
+                })
+
+        return Response(result, status=status.HTTP_200_OK)
+
 
 
 class VehicleDetailView(DetailView):
     model = Vehicle
     template_name = 'cars/vehicle_info.html'
     context_object_name = 'vehicle'
-    pk_url_kwarg = 'pk'
+    pk_url_kwarg = 'pk'  # если в urls.py: path('vehicles/<int:pk>/info/', ...)
 
     def get_context_data(self, **kwargs):
+        """
+        1) Предзаполнить последние 30 дней в полях (24ч формат без am/pm)
+        2) Не показывать поездки, пока пользователь не нажмёт "Показать"
+        3) Если есть GET-параметры start/end, фильтровать поездки, рисовать на карте
+        4) Каждой поездке присвоить цвет.
+        """
         context = super().get_context_data(**kwargs)
         vehicle = self.object
 
-        dto = VehicleDetailDTO(
-            vehicle_id=vehicle.id,
-            start_time=self.request.GET.get('start'),
-            end_time=self.request.GET.get('end')
-        )
+        # ---------- 1. Даты по умолчанию: последние 30 дней ----------
+        now = timezone.now()
+        default_start = now - timedelta(days=30)
 
-        try:
-            context.update(VehicleDetailService.get_context(dto))
-        except Exception as e:
-            # В случае ошибки просто используем контекст по умолчанию
-            context['start_value'] = (timezone.now() - timedelta(days=30)).strftime('%Y-%m-%dT%H:%M')
-            context['end_value'] = timezone.now().strftime('%Y-%m-%dT%H:%M')
-            context['trip_list'] = []
-            context['trip_data_json'] = '[]'
+        # Эти две переменные пойдут в <input type="datetime-local">
+        # Формат YYYY-MM-DDTHH:MM (24ч без am/pm)
+        context['start_value'] = default_start.strftime('%Y-%m-%dT%H:%M')
+        context['end_value'] = now.strftime('%Y-%m-%dT%H:%M')
+
+        # Считываем GET-параметры
+        start_str = self.request.GET.get('start')
+        end_str = self.request.GET.get('end')
+
+        # Пока не нажали "Показать", поездки не фильтруем
+        trip_list = []
+        trip_data = []
+
+        if start_str and end_str:
+            # Пользователь отправил форму, пытаемся распарсить
+            try:
+                local_start_naive = datetime.fromisoformat(start_str)  # наивный datetime
+                local_end_naive = datetime.fromisoformat(end_str)
+            except ValueError:
+                # Если пользователь ввёл некорректно, тогда оставим дефолты
+                local_start_naive = default_start
+                local_end_naive = now
+            
+            # Чтобы инпуты сохраняли введённые значения
+            context['start_value'] = local_start_naive.strftime('%Y-%m-%dT%H:%M')
+            context['end_value'] = local_end_naive.strftime('%Y-%m-%dT%H:%M')
+
+            # -------- Локальная таймзона предприятия --------
+            enterprise = vehicle.enterprise
+            if enterprise and enterprise.timezone:
+                local_tz = ZoneInfo(enterprise.timezone)
+            else:
+                local_tz = ZoneInfo("UTC")
+
+            local_start = local_start_naive.replace(tzinfo=local_tz)
+            local_end = local_end_naive.replace(tzinfo=local_tz)
+
+            # Переводим в UTC для фильтра
+            start_utc = local_start.astimezone(ZoneInfo("UTC"))
+            end_utc = local_end.astimezone(ZoneInfo("UTC"))
+
+            # -------- Фильтруем поездки --------
+            trips = Trip.objects.filter(
+                vehicle=vehicle,
+                start_time__gte=start_utc,
+                end_time__lte=end_utc
+            ).order_by('start_time')
+
+            colors = ["red", "blue", "green", "orange", "purple"]
+            for idx, trip in enumerate(trips):
+                # Для каждой поездки получаем список точек
+                track_points = TrackPoint.objects.filter(
+                    vehicle=vehicle,
+                    timestamp__gte=trip.start_time,
+                    timestamp__lte=trip.end_time
+                ).order_by('timestamp')
+
+                # Получаем локальные время старта/конца (для отображения)
+                local_start_time = enterprise.to_local_time(trip.start_time)
+                local_end_time = enterprise.to_local_time(trip.end_time)
+
+                # Назначаем цвет
+                color = colors[idx % len(colors)]
+
+                if track_points.exists():
+                    start_point = track_points.first()
+                    end_point = track_points.last()
+
+                    start_address = get_address_for_point(start_point.location)
+                    end_address = get_address_for_point(end_point.location)
+
+                    trip_list.append({
+                        "color": color,
+                        "start_time_local": local_start_time.strftime('%d.%m.%Y %H:%M'),
+                        "end_time_local": local_end_time.strftime('%d.%m.%Y %H:%M'),
+                        "duration": str(trip.duration) if trip.duration else None,
+                        "start_address": start_address,
+                        "end_address": end_address
+                    })
+
+                    # Для карты Leaflet — собираем координаты
+                    coords = []
+                    for tp in track_points:
+                        coords.append([tp.location.y, tp.location.x])  # lat, lon
+                    trip_data.append({
+                        "trip_id": trip.id,
+                        "color": color,
+                        "start_time": local_start_time.strftime('%d.%m.%Y %H:%M'),
+                        "end_time": local_end_time.strftime('%d.%m.%Y %H:%M'),
+                        "coords": coords
+                    })
+                else:
+                    # Нет точек трека
+                    trip_list.append({
+                        "color": color,
+                        "start_time_local": local_start_time.strftime('%d.%m.%Y %H:%M'),
+                        "end_time_local": local_end_time.strftime('%d.%m.%Y %H:%M'),
+                        "duration": str(trip.duration) if trip.duration else None,
+                        "start_address": None,
+                        "end_address": None
+                    })
+                    trip_data.append({
+                        "trip_id": trip.id,
+                        "color": color,
+                        "start_time": local_start_time.strftime('%d.%m.%Y %H:%M'),
+                        "end_time": local_end_time.strftime('%d.%m.%Y %H:%M'),
+                        "coords": []
+                    })
+
+        # Список поездок + данные для карты
+        context["trip_list"] = trip_list
+        context["trip_data_json"] = json.dumps(trip_data, ensure_ascii=False)
 
         return context
 
@@ -520,21 +738,52 @@ def _import_csv_zip(file):
 
 @api_view(['GET'])
 def report_api(request):
-    dto = ReportRequestDTO(
-        report_type=request.GET.get('report_type'),
-        vehicle_id=request.GET.get('vehicle_id'),
-        driver_id=request.GET.get('driver_id'),
-        enterprise_id=request.GET.get('enterprise_id'),
-        start_date=request.GET.get('start_date'),
-        end_date=request.GET.get('end_date'),
-        period=request.GET.get('period', 'day')
-    )
+    """
+    Пример: GET /cars/report-api/?report_type=car_mileage&vehicle_id=44&start=2024-12-01&end=2025-01-13&period=month
+    """
+    report_type = request.GET.get('report_type')
+    period = request.GET.get('period', 'day')
+    start_str = request.GET.get('start_date')
+    end_str = request.GET.get('end_date')
 
-    result = ReportService.generate_report(dto)
+    try:
+        start_date = datetime.strptime(start_str, '%Y-%m-%d').date()
+        end_date = datetime.strptime(end_str, '%Y-%m-%d').date()
+    except (ValueError, TypeError):
+        return Response({"error": "Неверный формат дат"}, status=status.HTTP_400_BAD_REQUEST)
 
-    if 'error' in result:
-        return Response(result, status=status.HTTP_400_BAD_REQUEST)
-    return Response(result, status=status.HTTP_200_OK)
+    if report_type == 'car_mileage':
+        vehicle_id = request.GET.get('vehicle_id')
+        if not vehicle_id:
+            return Response({"error": "Не указан vehicle_id"}, status=status.HTTP_400_BAD_REQUEST)
+        try:
+            report = generate_car_mileage_report(vehicle_id, start_date, end_date, period)
+            return Response(report.result, status=status.HTTP_200_OK)
+        except Vehicle.DoesNotExist:
+            return Response({"error": "Транспортное средство не найдено"}, status=status.HTTP_404_NOT_FOUND)
+
+    elif report_type == 'driver_time':
+        driver_id = request.GET.get('driver_id')
+        if not driver_id:
+            return Response({"error": "Не указан driver_id"}, status=status.HTTP_400_BAD_REQUEST)
+        try:
+            report = generate_driver_time_report(driver_id, start_date, end_date, period)
+            return Response(report.result, status=status.HTTP_200_OK)
+        except Driver.DoesNotExist:
+            return Response({"error": "Водитель не найден"}, status=status.HTTP_404_NOT_FOUND)
+
+    elif report_type == 'enterprise_active_cars':
+        enterprise_id = request.GET.get('enterprise_id')
+        if not enterprise_id:
+            return Response({"error": "Не указан enterprise_id"}, status=status.HTTP_400_BAD_REQUEST)
+        try:
+            report = generate_enterprise_active_cars_report(enterprise_id, start_date, end_date, period)
+            return Response(report.result, status=status.HTTP_200_OK)
+        except Enterprise.DoesNotExist:
+            return Response({"error": "Предприятие не найдено"}, status=status.HTTP_404_NOT_FOUND)
+
+    else:
+        return Response({"error": "Неизвестный тип отчёта"}, status=status.HTTP_400_BAD_REQUEST)
 
 
 def reports_list(request):
@@ -582,30 +831,66 @@ def reports_list(request):
 def view_report(request, report_id):
     report = get_object_or_404(Report, id=report_id)
     return JsonResponse(report.result, safe=False)
-
-
+    
 def upload_trip(request, vehicle_id):
     vehicle = get_object_or_404(Vehicle, id=vehicle_id)
-
+    
     if request.method == 'POST':
         form = TripUploadForm(request.POST, request.FILES)
         if form.is_valid():
-            dto = TripUploadDTO(
-                vehicle_id=vehicle_id,
-                start_time=form.cleaned_data['start_time'],
-                end_time=form.cleaned_data['end_time'],
-                gpx_file=request.FILES['gpx_file'].read()
-            )
-
-            try:
-                TripUploadService.upload_trip(dto)
+            start_time = form.cleaned_data['start_time']
+            end_time = form.cleaned_data['end_time']
+            gpx_file = request.FILES['gpx_file']
+            
+            # Проверяем, чтобы поездка не перекрывалась с существующими
+            if vehicle.trips.filter(start_time__lt=end_time, end_time__gt=start_time).exists():
+                form.add_error(None, "Новая поездка конфликтует с существующей.")
+            else:
+                try:
+                    # Читаем содержимое файла и сбрасываем указатель
+                    gpx_content = gpx_file.read().decode('utf-8')
+                    gpx_file.seek(0)
+                    gpx = gpxpy.parse(gpx_content)
+                    track_points_list = []  # Список для сохранения данных точек
+                    
+                    # Проходим по всем точкам трека
+                    for track in gpx.tracks:
+                        for segment in track.segments:
+                            for point in segment.points:
+                                if point.time is None or not (start_time <= point.time <= end_time):
+                                    form.add_error('gpx_file', "Все точки трека должны иметь время и находиться в заданном диапазоне.")
+                                    break
+                                # Создаем объект Point (GeoDjango ожидает координаты в формате (долгота, широта))
+                                geo_point = Point(point.longitude, point.latitude)
+                                track_points_list.append({
+                                    'timestamp': point.time,
+                                    'location': geo_point,
+                                })
+                except Exception as e:
+                    form.add_error('gpx_file', f"Ошибка при обработке GPX файла: {e}")
+            
+            if not form.errors:
+                # Создаем объект поездки
+                trip = Trip.objects.create(
+                    vehicle=vehicle,
+                    start_time=start_time,
+                    end_time=end_time,
+                    gpx_file=gpx_file,
+                )
+                # Создаем объекты TrackPoint для каждой точки маршрута
+                track_points_objects = [
+                    TrackPoint(
+                        vehicle=vehicle,
+                        timestamp=tp['timestamp'],
+                        location=tp['location']
+                    )
+                    for tp in track_points_list
+                ]
+                if track_points_objects:
+                    TrackPoint.objects.bulk_create(track_points_objects)
                 messages.success(request, "Поездка успешно добавлена!")
                 return redirect('cars:vehicle_info', pk=vehicle.id)
-            except ValidationError as e:
-                form.add_error(None, str(e))
-        # Обработка невалидной формы
-        return render(request, 'cars/upload_trip.html', {'form': form, 'vehicle': vehicle})
-
-    # GET запрос
-    form = TripUploadForm()
+    else:
+        form = TripUploadForm()
+    
     return render(request, 'cars/upload_trip.html', {'form': form, 'vehicle': vehicle})

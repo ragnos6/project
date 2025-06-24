@@ -3,3 +3,5 @@ id_rsa
 ..env.swp
 .env.swp
 id_rsa.pub
+__pycache__/
+*.pyc

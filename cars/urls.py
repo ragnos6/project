@@ -12,7 +12,6 @@ app_name='cars'
 urlpatterns = [
     path('', include(router.urls)),
     path('api-token-auth/', CustomAuthToken.as_view(), name='api_token_auth'),
-    path('test', test, name='test'),
     path('login/', ManagerLoginView.as_view(), name='login'),
     path('enterprises_list/', EnterpriseListView.as_view(), name='enterprises_list'),
     path('export-data/', export_data, name='export_data'),

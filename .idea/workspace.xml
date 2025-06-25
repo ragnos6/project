@@ -47,7 +47,6 @@
     "RunOnceActivity.ShowReadmeOnStart": "true",
     "RunOnceActivity.git.unshallow": "true",
     "git-widget-placeholder": "master",
-    "ignore.virus.scanning.warn.message": "true",
     "last_opened_file_path": "/Users/Sergei/PycharmProjects/project_rgns/backups",
     "node.js.detected.package.eslint": "true",
     "node.js.detected.package.tslint": "true",
@@ -120,7 +119,7 @@
       <option name="number" value="Default" />
       <option name="presentableId" value="Default" />
       <updated>1750782854199</updated>
-      <workItem from="1750782856540" duration="3268000" />
+      <workItem from="1750782856540" duration="4641000" />
       <workItem from="1750794673572" duration="2573000" />
     </task>
     <task id="LOCAL-00003" summary="Update 23.06">

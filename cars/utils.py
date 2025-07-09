@@ -251,11 +251,12 @@ def generate_enterprise_active_cars_report(enterprise_id, start_date, end_date, 
             })
 
         # Сохраняем результат для этого авто
-        cars_result.append({
-            "car_id": vehicle.id,
-            "driver_name": driver_name,
-            "mileage_data": mileage_data
-        })
+        if mileage_data:
+            cars_result.append({
+                "car_id": vehicle.id,
+                "driver_name": driver_name,
+                "mileage_data": mileage_data
+            })
 
     # 2) Собираем final JSON:
     final_result = {

@@ -20,6 +20,7 @@ from .dto import TrackPointRequestDTO, TrackPointResponseDTO, TripSummaryRequest
     ReportRequestDTO, TripUploadDTO
 import gpxpy
 import json
+from django.db import transaction, IntegrityError
 
 
 class TrackService:
@@ -303,26 +304,40 @@ class TripUploadService:
             raise ValidationError(f"Ошибка при обработке GPX файла: {e}")
 
         # Создание поездки
-        trip = Trip.objects.create(
-            vehicle=vehicle,
-            start_time=dto.start_time,
-            end_time=dto.end_time,
-            gpx_file=dto.gpx_file,
-        )
+        try:
+            with transaction.atomic():
+                # Блокируем строку vehicle, чтобы избежать race при одновременных загрузках
+                vehicle_locked = Vehicle.objects.select_for_update().get(id=vehicle.id)
 
-        # Создание точек трека
-        if track_points_list:
-            track_points_objects = [
-                TrackPoint(
-                    vehicle=vehicle,
-                    timestamp=tp['timestamp'],
-                    location=tp['location']
+                # Повторная проверка конфликта поездок под блокировкой
+                if vehicle_locked.trips.filter(start_time__lt=dto.end_time, end_time__gt=dto.start_time).exists():
+                    raise ValidationError("Новая поездка конфликтует с существующей.")
+
+                # Создание поездки
+                trip = Trip.objects.create(
+                    vehicle=vehicle_locked,
+                    start_time=dto.start_time,
+                    end_time=dto.end_time,
+                    gpx_file=dto.gpx_file,
                 )
-                for tp in track_points_list
-            ]
-            TrackPoint.objects.bulk_create(track_points_objects)
 
-        return trip
+                # Создание точек трека (bulk_create) — в той же транзакции
+                if track_points_list:
+                    track_points_objects = [
+                        TrackPoint(
+                            vehicle=vehicle_locked,
+                            timestamp=tp['timestamp'],
+                            location=tp['location']
+                        )
+                        for tp in track_points_list
+                    ]
+                    TrackPoint.objects.bulk_create(track_points_objects)
+
+                return trip
+
+        except IntegrityError as e:
+            # транзакция откатится автоматически; пробрасываем читаемую ошибку
+            raise ValidationError(f"Ошибка при сохранении поездки: {e}")
 
 class TripAPIService:
     @staticmethod
@@ -415,17 +430,21 @@ class ImportExportService:
         veh_res = VehicleResource()
         trip_res = TripResource()
 
-        # 1. Enterprise
-        if ent_sheet := sheets.get("Enterprise"):
-            ent_res.import_data(ent_sheet, dry_run=False)
+        try:
+            with transaction.atomic():
+                # 1. Enterprise
+                if ent_sheet := sheets.get("Enterprise"):
+                    ent_res.import_data(ent_sheet, dry_run=False)
 
-        # 2. Vehicle
-        if veh_sheet := sheets.get("Vehicle"):
-            veh_res.import_data(veh_sheet, dry_run=False)
+                # 2. Vehicle
+                if veh_sheet := sheets.get("Vehicle"):
+                    veh_res.import_data(veh_sheet, dry_run=False)
 
-        # 3. Trip
-        if trip_sheet := sheets.get("Trip"):
-            trip_res.import_data(trip_sheet, dry_run=False)
+                # 3. Trip
+                if trip_sheet := sheets.get("Trip"):
+                    trip_res.import_data(trip_sheet, dry_run=False)
+        except Exception as e:
+            raise ValidationError(f"Ошибка импорта JSON: {e}")
 
     @staticmethod
     def import_csv_zip(file):
@@ -506,7 +525,6 @@ class VehicleService:
         vehicle = Vehicle(
             model=form_data['model'],
             license_plate=form_data['license_plate'],
-            # ... другие поля ...
             enterprise=enterprise
         )
         vehicle.full_clean()  # Валидация модели

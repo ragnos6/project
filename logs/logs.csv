@@ -1,0 +1,22 @@
+Date,Time,IP,Method,Path,Protocol,Status,TotalTime,SQLCount,SQLTime,Params,ParamKeys
+2025-08-04,14:17:18,127.0.0.1,GET,/cars/vehicles/9804/info/,HTTP/1.1,200,0.026,1,0.001,{},
+2025-08-04,14:17:24,127.0.0.1,GET,/cars/vehicles/9804/info/,HTTP/1.1,200,0.026,1,0.001,"{""start"": [""2025-07-05T14:17""], ""end"": [""2025-08-04T14:17""]}",start;end
+2025-08-04,14:17:32,127.0.0.1,GET,/cars/reports/,HTTP/1.1,200,0.084,2,0.013,{},
+2025-08-04,14:17:34,127.0.0.1,GET,/cars/enterprises_list/,HTTP/1.1,200,0.057,1,0.001,{},
+2025-08-04,14:17:38,127.0.0.1,GET,/cars/enterprises/2/vehicles/,HTTP/1.1,200,0.08,3,0.007,{},
+2025-08-04,14:17:40,127.0.0.1,GET,/cars/vehicles/5205/edit/,HTTP/1.1,200,0.04,2,0.002,{},
+2025-08-04,14:17:44,127.0.0.1,GET,/cars/enterprises_list/,HTTP/1.1,200,0.047,1,0.001,{},
+2025-08-04,17:41:20,127.0.0.1,GET,/cars/enterprises_list/,HTTP/1.1,200,0.072,2,0.001,{},
+2025-08-04,17:41:22,127.0.0.1,GET,/cars/enterprises/3/vehicles/,HTTP/1.1,200,0.081,4,0.007,{},
+2025-08-04,17:41:23,127.0.0.1,GET,/cars/vehicles/10160/info/,HTTP/1.1,200,0.042,4,0.004,{},
+2025-08-04,17:41:28,127.0.0.1,GET,/cars/vehicles/10160/upload_trip/,HTTP/1.1,200,0.036,1,0.001,{},
+2025-08-04,17:41:56,127.0.0.1,GET,/cars/vehicles/9804/delete/,HTTP/1.1,200,0.03,2,0.002,{},
+2025-08-04,17:41:57,127.0.0.1,GET,/cars/enterprises_list/,HTTP/1.1,200,0.046,1,0.001,{},
+2025-08-04,17:42:01,127.0.0.1,GET,/cars/reports/,HTTP/1.1,200,0.052,1,0.001,{},
+2025-08-04,17:42:14,127.0.0.1,GET,/cars/report-api/,HTTP/1.1,200,7.522,1065,0.793,"{""report_type"": [""enterprise_active_cars""], ""period"": [""month""], ""start_date"": [""2025-06-02""], ""end_date"": [""2025-08-04""], ""enterprise_id"": [""2""]}",report_type;period;start_date;end_date;enterprise_id
+2025-08-16,21:33:35,127.0.0.1,GET,/,HTTP/1.1,302,0.087,1,0.006,{},
+2025-08-16,21:33:35,127.0.0.1,GET,/cars/login/,HTTP/1.1,200,0.032,1,0.001,{},
+2025-08-16,21:33:35,127.0.0.1,GET,/favicon.ico,HTTP/1.1,404,0.119,1,0.001,{},
+2025-08-16,21:33:37,127.0.0.1,GET,/cars/enterprises_list/,HTTP/1.1,200,0.063,2,0.002,{},
+2025-08-16,21:33:37,127.0.0.1,GET,/favicon.ico,HTTP/1.1,404,0.027,1,0.001,{},
+2025-08-16,21:33:39,127.0.0.1,GET,/cars/enterprises/3/vehicles/,HTTP/1.1,200,0.112,3,0.028,{},

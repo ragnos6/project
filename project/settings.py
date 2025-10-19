@@ -43,13 +43,16 @@ INSTALLED_APPS = [
     'django_bootstrap5',
     'cars',
     'leaflet',    
+    'cachalot',
     'rest_framework',
     'import_export',
+    'debug_toolbar',
     'rest_framework.authtoken',
     'django.contrib.gis',
 ]
 
 MIDDLEWARE = [
+    'cars.middleware.ApiLoggingMiddleware',
     'django.middleware.security.SecurityMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
     'django.middleware.common.CommonMiddleware',
@@ -57,7 +60,8 @@ MIDDLEWARE = [
     'django.contrib.auth.middleware.AuthenticationMiddleware',
     'django.contrib.messages.middleware.MessageMiddleware',
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
-    'cars.middleware.TimezoneMiddleware'
+    'cars.middleware.TimezoneMiddleware',
+    'debug_toolbar.middleware.DebugToolbarMiddleware'
 ]
 
 ROOT_URLCONF = 'project.urls'
@@ -81,7 +85,16 @@ TEMPLATES = [
 
 WSGI_APPLICATION = 'project.wsgi.application'
 
-
+CACHES = {
+    'default': {
+        'BACKEND': 'django_redis.cache.RedisCache',
+        'LOCATION': 'redis://127.0.0.1:6379/1',
+        'OPTIONS': {
+            'CLIENT_CLASS': 'django_redis.client.DefaultClient',
+        }
+    }
+}    
+    
 # Database
 # https://docs.djangoproject.com/en/5.1/ref/settings/#databases
 
@@ -128,6 +141,7 @@ USE_I18N = True
 
 USE_TZ = True
 
+INTERNAL_IPS = ['127.0.0.1', 'localhost']
 
 # Static files (CSS, JavaScript, Images)
 # https://docs.djangoproject.com/en/5.1/howto/static-files/
@@ -150,6 +164,30 @@ REST_FRAMEWORK = {
     ],
     'DEFAULT_PAGINATION_CLASS': 'rest_framework.pagination.PageNumberPagination',
     'PAGE_SIZE': 50,
+}
+
+LOGGING = {
+    'version': 1,
+    'handlers': {
+        'api_file': {
+            'level': 'INFO',
+            'class': 'logging.FileHandler',
+            'filename': 'logs/requests.log',
+            'formatter': 'detailed',
+        },
+    },
+    'loggers': {
+        'requests': {
+            'handlers': ['api_file'],
+            'level': 'INFO',
+            'propagate': False,
+        },
+    },
+    'formatters': {
+        'detailed': {
+            'format': '%(asctime)s %(name)s %(levelname)s %(message)s'
+        }
+    }
 }
 
 

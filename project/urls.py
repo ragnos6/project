@@ -18,6 +18,7 @@ from django.contrib import admin
 from django.urls import path, include
 from django.shortcuts import redirect
 from django.views.generic.base import RedirectView
+from django.conf import settings
 
 
 
@@ -28,3 +29,8 @@ urlpatterns = [
     path('api/', include ('cars.urls')),
 ]
 
+if settings.DEBUG:
+    import debug_toolbar
+    urlpatterns = [
+        path('debug/', include(debug_toolbar.urls)),
+    ] + urlpatterns

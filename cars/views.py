@@ -1,55 +1,93 @@
-import zoneinfo
 import os
-import json
 import io
+import json
 import zipfile
+import zoneinfo
+from datetime import datetime, timedelta
+from zoneinfo import ZoneInfo
+
 from django.contrib import messages
+from django.contrib.auth import authenticate
 from django.contrib.auth.mixins import LoginRequiredMixin
-from django.contrib.gis.geos import Point
-from django.shortcuts import render, get_object_or_404, redirect
 from django.contrib.auth.views import LoginView
+from django.contrib.auth.decorators import login_required
+from django.contrib.gis.geos import Point
 from django.core.paginator import Paginator
+from django.core.cache import cache
+from django.http import JsonResponse, HttpResponse, HttpResponseForbidden, FileResponse
+from django.shortcuts import render, get_object_or_404, redirect
+from django.urls import reverse, reverse_lazy
+from django.utils import timezone
 from django.utils.dateparse import parse_datetime
+from django.utils.decorators import method_decorator
+from django.views.decorators.cache import cache_page
+from django.views.decorators.csrf import csrf_protect
+from django.views.generic import ListView, TemplateView, DetailView
 from django.views.generic.edit import UpdateView, DeleteView
-from django.urls import reverse_lazy
+from django.db.models import Q, Prefetch
+
 from rest_framework import viewsets, status
 from rest_framework.views import APIView
-from .dto import TrackPointRequestDTO, TripSummaryRequestDTO, VehicleDetailDTO, ReportRequestDTO, TripUploadDTO
-from .permissions import IsManagerOrReadOnly
-from .forms import ManagerLoginForm, VehicleForm, ReportForm, TripUploadForm
-from .models import Vehicle, Enterprise, Driver, TrackPoint, Trip, Report
-from .serializers import VehicleSerializer, EnterpriseSerializer, DriverSerializer, CustomAuthTokenSerializer, \
-    TrackPointSerializer, TripAPIRequestSerializer, TripSummaryRequestSerializer
-from .resources import EnterpriseResource, VehicleResource, TripResource
-from .pagination import CustomVehiclePagination
-from .services import TrackService, TripService, VehicleDetailService, ReportService, TripUploadService, \
-    EnterpriseService, TripAPIService, ImportExportService, ReportFormService
-from .utils import generate_car_mileage_report, generate_driver_time_report, generate_enterprise_active_cars_report
 from rest_framework.response import Response
+from rest_framework.throttling import UserRateThrottle
 from rest_framework.authtoken.views import ObtainAuthToken
 from rest_framework.authtoken.models import Token
 from rest_framework.decorators import api_view
 from rest_framework.exceptions import PermissionDenied, ValidationError, NotFound
-from django.views.decorators.csrf import csrf_protect
-from django.views.generic import ListView, TemplateView
-from django.http import JsonResponse, HttpResponseForbidden, HttpResponse, FileResponse
-from django.contrib.auth import authenticate
-from django.contrib.auth.decorators import login_required
-from django.urls import reverse
-from django.utils import timezone
-from zoneinfo import ZoneInfo
-from datetime import datetime, timedelta
-from django.db.models import Q
-from django.views.generic import DetailView
+
 from tablib import Databook
 
+from .dto import (
+    TrackPointRequestDTO,
+    TripSummaryRequestDTO,
+    VehicleDetailDTO,
+    ReportRequestDTO,
+    TripUploadDTO,
+)
+from .forms import ManagerLoginForm, VehicleForm, ReportForm, TripUploadForm
+from .models import Vehicle, Enterprise, Driver, TrackPoint, Trip, Report
+from .permissions import IsManagerOrReadOnly
+from .serializers import (
+    VehicleSerializer,
+    EnterpriseSerializer,
+    DriverSerializer,
+    CustomAuthTokenSerializer,
+    TrackPointSerializer,
+    TripAPIRequestSerializer,
+    TripSummaryRequestSerializer,
+)
+from .resources import EnterpriseResource, VehicleResource, TripResource
+from .pagination import CustomVehiclePagination
+from .services import (
+    TrackService,
+    TripService,
+    VehicleDetailService,
+    ReportService,
+    TripUploadService,
+    EnterpriseService,
+    TripAPIService,
+    ImportExportService,
+    ReportFormService,
+)
+from .utils import (
+    generate_car_mileage_report,
+    generate_driver_time_report,
+    generate_enterprise_active_cars_report,
+)
 
-class EnterpriseViewSet(viewsets.ModelViewSet):
+
+
+@method_decorator(cache_page(30), name='list')  # кэшируем список на 30 секунд
+class EnterpriseViewSet(viewsets.ReadOnlyModelViewSet):
     serializer_class = EnterpriseSerializer
     permission_classes = [IsManagerOrReadOnly]
-    #
+    throttle_classes = [UserRateThrottle]
+
     def get_queryset(self):
-        return EnterpriseService.get_enterprises_for_user(self.request.user)
+        user = self.request.user
+        qs = EnterpriseService.get_enterprises_for_user(user)
+        return qs.select_related('region').prefetch_related('vehicles', 'managers')
+
 
 class EnterpriseListView(ListView):
     model = Enterprise
@@ -58,7 +96,6 @@ class EnterpriseListView(ListView):
 
     def get_queryset(self):
         return EnterpriseService.get_enterprises_for_user(self.request.user)
-
 
     def post(self, request, *args, **kwargs):
         EnterpriseService.update_timezones(self.get_queryset(), request.POST)
@@ -71,58 +108,67 @@ class EnterpriseListView(ListView):
         return context
 
 
-class VehicleViewSet(viewsets.ModelViewSet):
+@method_decorator(cache_page(20), name='list')  # кэш списка машин
+class VehicleViewSet(viewsets.ReadOnlyModelViewSet):  # если не редактируется — ReadOnly
     serializer_class = VehicleSerializer
     permission_classes = [IsManagerOrReadOnly]
     pagination_class = CustomVehiclePagination
+    throttle_classes = [UserRateThrottle]
 
     def get_queryset(self):
-        return VehicleService.get_vehicles_for_user(self.request.user)
-
+        user = self.request.user
+        # подгружаем связи, чтобы не было N+1 запросов
+        qs = VehicleService.get_vehicles_for_user(user)
+        return qs.select_related('enterprise').prefetch_related('drivers')
 
     def get_object(self):
-        return VehicleService.get_vehicle_for_user(self.request.user, pk=self.kwargs['pk'])
+        # оптимизация: не вызываем ORM дважды
+        return VehicleService.get_vehicle_for_user(self.request.user, self.kwargs['pk'])
+
 
 
 class DriverViewSet(viewsets.ModelViewSet):
     serializer_class = DriverSerializer
     permission_classes = [IsManagerOrReadOnly]
-    
+
     def get_queryset(self):
         user = self.request.user
-        
+
         if user.is_superuser:
             return Driver.objects.all()
-            
+
         # Фильтруем водителей по предприятиям, доступным менеджеру
         if hasattr(user, 'manager'):
             return Driver.objects.filter(enterprise__in=user.manager.enterprises.all())
         return Driver.objects.none()
 
     # Для получения токена и ошибки, если введеные данные неверны, или пароль неверный
+
+
 class CustomAuthToken(ObtainAuthToken):
     def post(self, request, *args, **kwargs):
         serializer = CustomAuthTokenSerializer(data=request.data)
-        
+
         # Валидация введенных данных
         if serializer.is_valid():
             user = authenticate(
-	        username=serializer.validated_data['username'],
-	        password=serializer.validated_data['password']
+                username=serializer.validated_data['username'],
+                password=serializer.validated_data['password']
             )
             if user:
                 token, created = Token.objects.get_or_create(user=user)
                 return Response({'token': token.key})
             else:
                 return Response(
-	            {"detail": "Invalid credentials"},
-	            status=status.HTTP_401_UNAUTHORIZED
-	        )
+                    {"detail": "Invalid credentials"},
+                    status=status.HTTP_401_UNAUTHORIZED
+                )
         return Response(
             {"detail": "Invalid request"},
             status=status.HTTP_400_BAD_REQUEST
         )
-        
+
+
 class ManagerLoginView(LoginView):
     template_name = 'cars/login.html'
     authentication_form = ManagerLoginForm
@@ -173,12 +219,14 @@ class VehicleManageView(LoginRequiredMixin, TemplateView):
         context = self.get_context_data(**kwargs)
         context['vehicle_form'] = form
         return self.render_to_response(context)
-            
+
+
 class VehicleEditView(UpdateView):
     model = Vehicle
     form_class = VehicleForm
     template_name = 'cars/edit_vehicle.html'
     success_url = reverse_lazy('cars:enterprises_list')
+
 
 class VehicleDeleteView(DeleteView):
     model = Vehicle
@@ -202,24 +250,41 @@ class TrackPointView(APIView):
             return Response({'error': str(e)}, status=status.HTTP_400_BAD_REQUEST)
         except Exception as e:
             return Response({'error': 'Internal server error'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-        
-        
+
+
 class TripAPI(APIView):
+    throttle_classes = [UserRateThrottle]
+
     def get(self, request, vehicle_id):
         serializer = TripAPIRequestSerializer(data=request.query_params)
         serializer.is_valid(raise_exception=True)
         start_date = serializer.validated_data['start']
         end_date = serializer.validated_data['end']
 
+        cache_key = f"trip_points:{vehicle_id}:{start_date}:{end_date}"
+        cached_data = cache.get(cache_key)
+        if cached_data:
+            return Response(cached_data, status=status.HTTP_200_OK)
+
         try:
+            # получаем трекпоинты через сервис
             track_points = TripAPIService.get_trips_track_points(vehicle_id, start_date, end_date)
             serializer_tp = TrackPointSerializer(track_points, many=True)
-            return Response(serializer_tp.data, status=status.HTTP_200_OK)
+            data = serializer_tp.data
+
+            # кэшируем результат на 60 секунд
+            cache.set(cache_key, data, timeout=60)
+
+            return Response(data, status=status.HTTP_200_OK)
+
         except NotFound as e:
             return Response({"error": str(e)}, status=status.HTTP_404_NOT_FOUND)
-        except Exception:
+        except ValidationError as e:
+            return Response({"error": str(e)}, status=status.HTTP_400_BAD_REQUEST)
+        except Exception as e:
+            # вывод в консоль для отладки
+            print("🚨 TripAPI internal error:", e)
             return Response({"error": "Internal server error"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-
 
 
 class TripSummaryAPI(APIView):
@@ -234,7 +299,6 @@ class TripSummaryAPI(APIView):
 
         try:
             result = TripService.get_trip_summary(dto)
-            # Преобразуем DTO в словари для сериализации
             result_data = [{
                 "start_time_local": item.start_time_local,
                 "end_time_local": item.end_time_local,
@@ -279,6 +343,7 @@ class VehicleDetailView(DetailView):
 
         return context
 
+
 # Экспорт данных предприятия
 def export_data(request):
     enterprise_id = request.GET.get('enterprise_id')
@@ -304,7 +369,8 @@ def export_data(request):
 
     except Exception as e:
         return HttpResponse(f"Ошибка при экспорте: {str(e)}", status=500)
-        
+
+
 # Импорт данных по предприятию
 def import_data(request):
     if request.method == 'POST':
@@ -328,6 +394,7 @@ def import_data(request):
             return HttpResponse(f"Ошибка при импорте: {str(e)}", status=500)
 
     return HttpResponse("Используйте POST", status=405)
+
 
 @api_view(['GET'])
 def report_api(request):
@@ -369,8 +436,8 @@ def reports_list(request):
     reports = Report.objects.all().order_by('-created_at')
     context = {'form': form, 'reports': reports}
     return render(request, 'cars/reports_list.html', context)
-    
-    
+
+
 def view_report(request, report_id):
     report = get_object_or_404(Report, id=report_id)
     return JsonResponse(report.result, safe=False)

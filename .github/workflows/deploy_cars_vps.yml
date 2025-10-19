@@ -110,7 +110,7 @@ jobs:
             # Запускаем ТОЛЬКО базу данных
             sudo docker compose up db -d
             
-            # Ждем готовности БД
+            # Ждем готовности БД - используем сокет
             echo "[*] Ожидание готовности базы данных..."
             until sudo docker compose exec -T db pg_isready -U postgres; do
               sleep 2
@@ -118,20 +118,20 @@ jobs:
             echo "→ БД готова к подключению!"
             
             echo "→ Завершаем активные подключения к базе projectdb..."
-            # Используем TCP соединение с паролем вместо socket peer authentication
-            sudo docker compose exec -T db psql -h localhost -U postgres -d postgres -c "
-              SELECT pg_terminate_backend(pid)
-              FROM pg_stat_activity 
-              WHERE datname = 'projectdb' AND pid <> pg_backend_pid();
-            " || echo "[!] Предупреждение: не удалось завершить некоторые подключения"
+            sudo docker compose exec -T db su postgres -c "
+              psql -d postgres -c \"
+                SELECT pg_terminate_backend(pid)
+                FROM pg_stat_activity 
+                WHERE datname = 'projectdb' AND pid <> pg_backend_pid();
+              \"" || echo "[!] Предупреждение: не удалось завершить некоторые подключения"
             
             echo "→ Дропаем базу projectdb, если существует..."
-            sudo docker compose exec -T db psql -h localhost -U postgres -d postgres -c "DROP DATABASE IF EXISTS projectdb;" || {
+            sudo docker compose exec -T db su postgres -c 'psql -d postgres -c "DROP DATABASE IF EXISTS projectdb;"' || {
               echo "[!] Не удалось дропнуть базу projectdb"; exit 1;
             }
             
             echo "→ Создаём базу projectdb..."
-            sudo docker compose exec -T db psql -h localhost -U postgres -d postgres -c "CREATE DATABASE projectdb OWNER hunter;" || {
+            sudo docker compose exec -T db su postgres -c 'psql -d postgres -c "CREATE DATABASE projectdb OWNER hunter;"' || {
               echo "[!] Не удалось создать базу projectdb"; exit 1;
             }
             
@@ -139,8 +139,8 @@ jobs:
             # Копируем дамп в контейнер
             sudo docker cp ~/project/backups/dump_1.sql $(sudo docker compose ps -q db):/tmp/dump.sql
             
-            # Восстанавливаем используя TCP соединение
-            sudo docker compose exec -T db psql -h localhost -U postgres -d projectdb -f /tmp/dump.sql || {
+            # Восстанавливаем дамп от имени postgres
+            sudo docker compose exec -T db su postgres -c 'psql -d projectdb -f /tmp/dump.sql' || {
               echo "[!] Ошибка при восстановлении дампа"; exit 1;
             }
             

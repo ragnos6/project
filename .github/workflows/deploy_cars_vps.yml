@@ -55,7 +55,6 @@ jobs:
             sudo usermod -aG docker $USER || true
           fi
           
-          # Проверка и установка плагина Docker Compose (рекомендуется)
           if ! docker compose version &> /dev/null; then
             echo "→ Установка Docker Compose (CLI плагин)..."
             DOCKER_CONFIG=${DOCKER_CONFIG:-$HOME/.docker}
@@ -72,7 +71,7 @@ jobs:
           cd ~/project
     
           echo "[*] Обновление docker-compose.yml для использования готового образа..."
-          sudo sed -i 's|build: \.|image: hunter6868/project_cars:0.2|g' docker-compose.yml
+          sudo sed -i 's|build: \.|image: hunter6868/project_cars:0.3|g' docker-compose.yml
     
           echo "[*] Остановка и удаление старых контейнеров..."
           sudo docker compose down --rmi all --remove-orphans || true

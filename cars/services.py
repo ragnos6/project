@@ -543,9 +543,24 @@ class VehicleService:
             vehicle = Vehicle.objects.get(pk=pk)
         except Vehicle.DoesNotExist:
             raise PermissionDenied("ACCESS DENIED")
-        # Проверка доступа
         if user.is_superuser:
             return vehicle
         if hasattr(user, 'manager') and vehicle.enterprise in user.manager.enterprises.all():
             return vehicle
         raise PermissionDenied("ACCESS DENIED")
+        
+class DriverService:
+    @staticmethod
+    def get_drivers_for_user(user):
+        if user.is_superuser:
+            return Driver.objects.all()
+        if hasattr(user, 'manager'):
+            return Driver.objects.filter(
+                enterprise__in=user.manager.enterprises.all()
+            )
+        return Driver.objects.none()
+
+    @staticmethod
+    def get_driver_for_user(user, pk):
+        queryset = DriverService.get_drivers_for_user(user)
+        return get_object_or_404(queryset, pk=pk)

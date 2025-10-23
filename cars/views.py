@@ -57,7 +57,7 @@ from .serializers import (
     TripSummaryRequestSerializer,
 )
 from .resources import EnterpriseResource, VehicleResource, TripResource
-from .pagination import CustomVehiclePagination
+from .pagination import CustomVehiclePagination, CustomDriverPagination
 from .services import (
     TrackService,
     TripService,
@@ -68,6 +68,7 @@ from .services import (
     TripAPIService,
     ImportExportService,
     ReportFormService,
+    DriverService,
 )
 from .utils import (
     generate_car_mileage_report,
@@ -117,7 +118,6 @@ class VehicleViewSet(viewsets.ReadOnlyModelViewSet):  # если не редак
 
     def get_queryset(self):
         user = self.request.user
-        # подгружаем связи, чтобы не было N+1 запросов
         qs = VehicleService.get_vehicles_for_user(user)
         return qs.select_related('enterprise').prefetch_related('drivers')
 
@@ -126,24 +126,20 @@ class VehicleViewSet(viewsets.ReadOnlyModelViewSet):  # если не редак
         return VehicleService.get_vehicle_for_user(self.request.user, self.kwargs['pk'])
 
 
-
-class DriverViewSet(viewsets.ModelViewSet):
+@method_decorator(cache_page(20), name='list')  
+class DriverViewSet(viewsets.ReadOnlyModelViewSet): 
     serializer_class = DriverSerializer
     permission_classes = [IsManagerOrReadOnly]
+    pagination_class = CustomDriverPagination
+    throttle_classes = [UserRateThrottle]
 
     def get_queryset(self):
         user = self.request.user
+        qs = DriverService.get_drivers_for_user(user)
+        return qs.select_related('enterprise').prefetch_related('vehicles')
 
-        if user.is_superuser:
-            return Driver.objects.all()
-
-        # Фильтруем водителей по предприятиям, доступным менеджеру
-        if hasattr(user, 'manager'):
-            return Driver.objects.filter(enterprise__in=user.manager.enterprises.all())
-        return Driver.objects.none()
-
-    # Для получения токена и ошибки, если введеные данные неверны, или пароль неверный
-
+    def get_object(self):
+        return DriverService.get_driver_for_user(self.request.user, self.kwargs['pk'])
 
 class CustomAuthToken(ObtainAuthToken):
     def post(self, request, *args, **kwargs):
@@ -174,7 +170,6 @@ class ManagerLoginView(LoginView):
     authentication_form = ManagerLoginForm
 
     def get_success_url(self):
-        # После успешной авторизации перенаправляем на страницу доступных предприятий
         return reverse('cars:enterprises_list')
 
 

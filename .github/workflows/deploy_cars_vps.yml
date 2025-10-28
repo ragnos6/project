@@ -79,14 +79,16 @@ jobs:
           echo "[*] Скачивание нового образа из Docker Hub..."
           echo "${{ secrets.DOCKERHUB_PASSWORD }}" | sudo docker login -u "${{ secrets.DOCKERHUB_USERNAME }}" --password-stdin
           sudo docker compose pull
-    
+          # явно задаём платформу для docker (если ваши образы arm64, принудить amd64)
+          export DOCKER_DEFAULT_PLATFORM=linux/amd64
+          
           echo "[*] Запуск контейнеров в фоновом режиме..."
-          sudo docker compose up -d
-    
-          # Ожидание готовности базы данных
+          sudo docker compose up -d --build
+          
+          # Ожидание готовности базы данных (максимум 2 минуты)
           echo "[*] Ожидание готовности базы данных (максимум 2 минуты)..."
           for i in {1..24}; do
-            if sudo docker compose exec db pg_isready -U postgres; then
+            if sudo docker compose exec -T db pg_isready -U postgres >/dev/null 2>&1; then
               echo "→ БД готова к подключению!"
               break
             fi
@@ -94,53 +96,62 @@ jobs:
             sleep 5
             if [ $i -eq 24 ]; then
               echo "[!] Ошибка: БД не запустилась вовремя"
-              sudo docker compose logs db
+              sudo docker compose logs db --tail=200
               exit 1
             fi
           done
-    
+          
+          # проверяем, действительно ли внутри контейнера есть сокет и psql
+          sudo docker compose exec -T db sh -c 'echo "whoami: $(whoami)"; psql -V; ls -la /var/run/postgresql || true'
+          
           echo "[*] Проверка наличия дампа для восстановления..."
           if [ -f ~/project/backups/dump_1.sql ]; then
             echo "→ Найден дамп БД. Восстанавливаем..."
-            
-            sudo docker compose stop web
+            # отключаем web чтобы не было активных соединений от приложения
+            sudo docker compose stop web || true
           
-            echo "→ Завершаем активные подключения к базе projectdb..."
-            sudo docker compose exec -T db su postgres -c \
-              "psql -d postgres -c \"
-                SELECT pg_terminate_backend(pid)
-                FROM pg_stat_activity
-                WHERE datname = 'projectdb' AND pid <> pg_backend_pid();
-              \"" || {
-              echo "[!] Не удалось завершить подключения к базе projectdb"; exit 1;
+            echo "→ Попытка завершить активные подключения к базе projectdb..."
+            sudo docker compose exec -T db psql -U postgres -d postgres -c \
+              "SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = 'projectdb' AND pid <> pg_backend_pid();" || {
+              echo "[!] Предупреждение: не удалось завершить некоторые подключения (продолжаем попытку восстановления)"
             }
-            echo "→ Дропаем базу projectdb, если существует..."
-            # Используем пользователя hunter для административных операций
-            sudo docker compose exec -T db su postgres -c 'psql -d postgres -c "DROP DATABASE IF EXISTS projectdb;"' || {
-              echo "[!] Не удалось дропнуть базу projectdb"; exit 1;
+          
+            echo "→ Удаляем базу projectdb (если есть) и создаём заново..."
+            sudo docker compose exec -T db psql -U postgres -d postgres -c "DROP DATABASE IF EXISTS projectdb;" || { echo "[!] Не удалось дропнуть DB"; sudo docker compose logs db --tail=200; exit 1; }
+            sudo docker compose exec -T db psql -U postgres -d postgres -c "CREATE DATABASE projectdb OWNER hunter;" || { echo "[!] Не удалось создать DB"; sudo docker compose logs db --tail=200; exit 1; }
+          
+            echo "→ Восстанавливаем дамп в projectdb..."
+            # Подаём дамп через stdin в psql внутри контейнера
+            cat ~/project/backups/dump_1.sql | sudo docker compose exec -T db psql -U postgres -d projectdb || {
+              echo "[!] Ошибка при восстановлении дампа"; sudo docker compose logs db --tail=200; exit 1;
             }
-            
-            echo "→ Создаём базу projectdb..."
-            sudo docker compose exec -T db su postgres -c 'psql -d postgres -c "CREATE DATABASE projectdb OWNER hunter;"' || {
-              echo "[!] Не удалось создать базу projectdb"; exit 1;
-            }
-            
-            echo "→ Восстанавливаем из ~/project/backups/dump_1.sql..."
-            cat ~/project/backups/dump_1.sql | sudo docker compose exec -T db su postgres -c 'psql -d projectdb' || {
-              echo "[!] Ошибка при восстановлении дампа"; exit 1;
-            }
-            
+          
             echo "✓ База данных успешно восстановлена из дампа"
-            # Очистим переменную
           else
             echo "→ Дамп не найден. Пропускаем восстановление."
           fi
-          sudo docker compose up web -d
-
+          
+          # Запускаем web и ждём пока он поднимется (можете ждать healthcheck/проверку эндпойнта)
+          sudo docker compose up -d web
+          
+          # Подождём, пока web станет доступен (необязательно, но полезно)
+          for i in {1..12}; do
+            if sudo docker compose exec -T web python -V >/dev/null 2>&1; then
+              echo "→ Web-контейнер запущен"
+              break
+            fi
+            echo "→ Ожидание web... (попытка $i/12)"
+            sleep 5
+            if [ $i -eq 12 ]; then
+              echo "[!] Web не поднялся вовремя"; sudo docker compose logs web --tail=200; exit 1;
+            fi
+          done
+          
           echo "[*] Применение миграций Django..."
-          sudo docker compose exec web python manage.py migrate
-    
+          sudo docker compose exec web python manage.py migrate --noinput
+          
           echo "[*] Сборка статики Django..."
           sudo docker compose exec web python manage.py collectstatic --noinput --clear
-    
+          
           echo "=== Деплой завершён успешно ==="
+          

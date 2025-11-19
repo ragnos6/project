@@ -1,4 +1,4 @@
-name: checks_before_deploy
+name: checks
 
 on:
   push:

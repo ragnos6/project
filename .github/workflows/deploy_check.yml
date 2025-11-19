@@ -1,16 +1,32 @@
-name: Deploy check
+name: CI Checks for Cars Project
 
 on:
   push:
     branches: ["main"]
   pull_request:
+    branches: ["main"]
 
 jobs:
   ci:
     runs-on: ubuntu-latest
 
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_DB: projectdb
+          POSTGRES_USER: hunter
+          POSTGRES_PASSWORD: password
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd="pg_isready -U hunter -d projectdb"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=5
+
     steps:
-    - name: Checkout repository
+    - name: Checkout code
       uses: actions/checkout@v4
 
     - name: Set up Python
@@ -24,14 +40,40 @@ jobs:
         pip install -r requirements.txt
         pip install ruff
 
-    - name: Run Ruff (lint)
-      run: ruff check .
+    - name: Lint with Ruff
+      run: |
+        ruff check .
+
+    - name: Wait for Postgres to become ready
+      run: |
+        for i in {1..10}; do
+          pg_isready -h localhost -p 5432 -U hunter -d projectdb && break
+          echo "Postgres is not ready yet..."
+          sleep 3
+        done
 
     - name: Check migrations
-      run: python manage.py makemigrations --check --dry-run
+      env:
+        DB_NAME: projectdb
+        DB_USER: hunter
+        DB_PASSWORD: password
+        DB_HOST: localhost
+        DB_PORT: 5432
+      run: |
+        echo "Checking migrations..."
+        python manage.py makemigrations --check --dry-run
 
     - name: Run Django tests
-      run: python manage.py test
+      env:
+        DB_NAME: projectdb
+        DB_USER: hunter
+        DB_PASSWORD: password
+        DB_HOST: localhost
+        DB_PORT: 5432
+      run: |
+        python manage.py test -v 2
 
     - name: Test Docker build
-      run: docker build -t testimage .
+      run: |
+        echo "Testing Docker build..."
+        docker build -t cars-test-image .

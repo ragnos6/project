@@ -1,4 +1,4 @@
-name: CI Checks for Cars Project
+name: checks_before_deploy
 
 on:
   push:

@@ -25,7 +25,6 @@ service:
       processors: [batch]
       exporters: [otlp/tempo]
 
-    # ВАЖНО: отдельный metrics pipeline, чтобы /metrics был поднят стабильно
     metrics:
       receivers: [otlp]
       processors: [batch]

@@ -348,4 +348,7 @@ class EnterpriseActiveCarsReport(Report):
             self.report_type = "EnterpriseActiveCarsReport"
         super().save(*args, **kwargs)
 
+class FakeRecord(models.Model):
+    created_at = models.DateTimeField(auto_now_add=True)
+    payload = models.JSONField()
 

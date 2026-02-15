@@ -1,13 +1,10 @@
 from locust import HttpUser, task, between
+import random
 
-class DjangoReadOnlyUser(HttpUser):
-    wait_time = between(0, 0)  # без паузы — чтобы выжать максимум RPS
+class DjangoAsyncWriter(HttpUser):
+    wait_time = between(0, 0)
 
-    def on_start(self):
-        self.headers = {"Authorization": f"Token 43f9553733f75df08073d9acad8fdc34b6735497"}
-
-    @task(1)
-    def get_drivers(self):
-        self.client.get("/cars/drivers/", headers=self.headers)
-
-
+    @task
+    def post_fake_data(self):
+        data = {"value": random.randint(0, 1000)}
+        self.client.post("/cars/test_async/", json=data)

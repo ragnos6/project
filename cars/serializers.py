@@ -53,6 +53,9 @@ class DriverSerializer(serializers.ModelSerializer):
         model = Driver
         fields = '__all__'
         
+class AuthTokenResponseSerializer(serializers.Serializer):
+    token = serializers.CharField()
+    
 class CustomAuthTokenSerializer(serializers.Serializer):
     username = serializers.CharField()
     password = serializers.CharField(write_only=True)

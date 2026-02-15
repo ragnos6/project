@@ -3,6 +3,7 @@ import zoneinfo
 from typing import List, io
 from zoneinfo import ZoneInfo
 from django.contrib.gis.geos import Point
+from django.utils.timezone import now
 from django.db.models import Q
 from django.http import HttpResponse
 from django.utils import timezone
@@ -521,15 +522,42 @@ class EnterpriseService:
 
 class VehicleService:
     @staticmethod
+    @transaction.atomic
     def create_vehicle(form_data, enterprise):
+        # 1) Создаём без ManyToMany и без active_driver (он зависит от drivers)
         vehicle = Vehicle(
-            model=form_data['model'],
-            license_plate=form_data['license_plate'],
-            enterprise=enterprise
+            cost=form_data["cost"],
+            year_of_production=form_data["year_of_production"],
+            mileage=form_data["mileage"],
+            color=form_data["color"],
+            transmission=form_data["transmission"],
+            fuel_type=form_data["fuel_type"],
+
+            model=form_data.get("model"),                  # или form_data["model"]
+            documentation=form_data.get("documentation"),
+            enterprise=enterprise,                          # enterprise берём из аргумента
+            purchase_date=form_data.get("purchase_date", now()),
         )
-        vehicle.full_clean()  # Валидация модели
+
+        # Важно: Django не запускает полную валидацию модели автоматически при save(),
+        # поэтому full_clean вызывается вручную. [web:26]
+        vehicle.full_clean()
         vehicle.save()
+
+        # 2) Проставляем ManyToMany drivers (можно только после save) [web:22]
+        drivers = form_data.get("drivers")
+        if drivers is not None:
+            vehicle.drivers.set(drivers)
+
+        # 3) Теперь можно назначить active_driver и провалидировать ваш clean()
+        active_driver = form_data.get("active_driver")
+        if active_driver is not None:
+            vehicle.active_driver = active_driver
+            vehicle.full_clean()
+            vehicle.save(update_fields=["active_driver"])
+
         return vehicle
+
     @staticmethod
     def get_vehicles_for_user(user):
         if user.is_superuser:

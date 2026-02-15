@@ -13,12 +13,12 @@ https://docs.djangoproject.com/en/5.1/ref/settings/
 from pathlib import Path
 import os
 from dotenv import load_dotenv
-load_dotenv()
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
 
-
+ENV_FILE = os.environ.get("ENV_FILE", str(BASE_DIR / ".env"))
+load_dotenv(ENV_FILE, override=True)
 # Quick-start development settings - unsuitable for production
 # See https://docs.djangoproject.com/en/5.1/howto/deployment/checklist/
 
@@ -28,8 +28,10 @@ SECRET_KEY = os.getenv("DJANGO_SECRET_KEY")
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = True
 
-ALLOWED_HOSTS = os.environ.get("DJANGO_ALLOWED_HOSTS", "").split(",")
+#ALLOWED_HOSTS = os.environ.get("DJANGO_ALLOWED_HOSTS", "").split(",")
+ALLOWED_HOSTS = ["*"]
 
+# Grafana pass puykdzonzfgovlah
 
 # Application definition
 
@@ -42,9 +44,13 @@ INSTALLED_APPS = [
     'django.contrib.staticfiles',
     'django_bootstrap5',
     'cars',
-    'leaflet',    
+    'leaflet', 
+#    'notify',   
     'cachalot',
+    "django_prometheus",
     'rest_framework',
+    "drf_yasg",
+    'notify.apps.NotificationsConfig',
     'import_export',
     'debug_toolbar',
     'rest_framework.authtoken',
@@ -52,6 +58,8 @@ INSTALLED_APPS = [
 ]
 
 MIDDLEWARE = [
+    "django_prometheus.middleware.PrometheusBeforeMiddleware",
+    "monitoring.db_metrics.PrometheusDBExecuteWrapperMiddleware",    
     'cars.middleware.ApiLoggingMiddleware',
     'django.middleware.security.SecurityMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
@@ -61,7 +69,8 @@ MIDDLEWARE = [
     'django.contrib.messages.middleware.MessageMiddleware',
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
     'cars.middleware.TimezoneMiddleware',
-    'debug_toolbar.middleware.DebugToolbarMiddleware'
+    'debug_toolbar.middleware.DebugToolbarMiddleware',
+    "django_prometheus.middleware.PrometheusAfterMiddleware",
 ]
 
 ROOT_URLCONF = 'project.urls'
@@ -94,7 +103,16 @@ CACHES = {
         }
     }
 }    
-    
+ 
+SPECTACULAR_SETTINGS = {
+    "TITLE": "Cars API",
+    "DESCRIPTION": "Документация API для vehicles, trips, auth, reports",
+    "VERSION": "1.0.0",
+}
+   
+KAFKA_BOOTSTRAP_SERVERS = os.getenv('KAFKA_BOOTSTRAP_SERVERS', 'localhost:9092')
+KAFKA_VEHICLE_TOPIC = 'vehicle.events'
+
 # Database
 # https://docs.djangoproject.com/en/5.1/ref/settings/#databases
 
@@ -154,6 +172,7 @@ STATIC_URL = 'static/'
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 
 REST_FRAMEWORK = {
+    'DEFAULT_SCHEMA_CLASS': 'drf_spectacular.openapi.AutoSchema',
     'DEFAULT_AUTHENTICATION_CLASSES': [
         'rest_framework.authentication.TokenAuthentication',
         'rest_framework.authentication.SessionAuthentication',

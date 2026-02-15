@@ -197,7 +197,7 @@ def generate_enterprise_active_cars_report(enterprise_id, start_date, end_date, 
         active_driver__isnull=False
     )
 
-    cars_result = []  # список для итоговых данных
+    cars_result = []
 
     for vehicle in vehicles:
         driver = vehicle.active_driver

@@ -23,10 +23,12 @@ from django.conf import settings
 
 
 urlpatterns = [
+    path("", include("django_prometheus.urls")),
     path('admin/', admin.site.urls),
     path('cars/', include('cars.urls', 'cars')),
     path('', RedirectView.as_view(url='cars/login/')),
     path('api/', include ('cars.urls')),
+
 ]
 
 if settings.DEBUG:

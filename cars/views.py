@@ -5,6 +5,9 @@ import zipfile
 import zoneinfo
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
+from django.views.decorators.csrf import csrf_exempt
+from .tasks import save_driver_data
+from drf_yasg.utils import swagger_auto_schema
 
 from django.contrib import messages
 from django.contrib.auth import authenticate
@@ -25,6 +28,8 @@ from django.views.decorators.csrf import csrf_protect
 from django.views.generic import ListView, TemplateView, DetailView
 from django.views.generic.edit import UpdateView, DeleteView
 from django.db.models import Q, Prefetch
+from django.shortcuts import redirect
+from drf_yasg import openapi
 
 from rest_framework import viewsets, status
 from rest_framework.views import APIView
@@ -55,6 +60,7 @@ from .serializers import (
     TrackPointSerializer,
     TripAPIRequestSerializer,
     TripSummaryRequestSerializer,
+    AuthTokenResponseSerializer,
 )
 from .resources import EnterpriseResource, VehicleResource, TripResource
 from .pagination import CustomVehiclePagination, CustomDriverPagination
@@ -69,6 +75,7 @@ from .services import (
     ImportExportService,
     ReportFormService,
     DriverService,
+    VehicleService,
 )
 from .utils import (
     generate_car_mileage_report,
@@ -115,7 +122,23 @@ class VehicleViewSet(viewsets.ReadOnlyModelViewSet):  # если не редак
     permission_classes = [IsManagerOrReadOnly]
     pagination_class = CustomVehiclePagination
     throttle_classes = [UserRateThrottle]
+    
+    @swagger_auto_schema(
+        operation_summary="Список автомобилей",
+        operation_description="Возвращает автомобили, доступные текущему пользователю.",
+        tags=["Vehicles"],
+    )
+    def list(self, request, *args, **kwargs):
+        return super().list(request, *args, **kwargs)
 
+    @swagger_auto_schema(
+        operation_summary="Детали автомобиля",
+        operation_description="Возвращает один автомобиль по id.",
+        tags=["Vehicles"],
+    )
+    
+    def retrieve(self, request, *args, **kwargs):
+        return super().retrieve(request, *args, **kwargs)
     def get_queryset(self):
         user = self.request.user
         qs = VehicleService.get_vehicles_for_user(user)
@@ -142,6 +165,18 @@ class DriverViewSet(viewsets.ReadOnlyModelViewSet):
         return DriverService.get_driver_for_user(self.request.user, self.kwargs['pk'])
 
 class CustomAuthToken(ObtainAuthToken):
+
+    @swagger_auto_schema(
+        operation_summary="Получить auth token",
+        request_body=CustomAuthTokenSerializer,
+        responses={
+            status.HTTP_200_OK: AuthTokenResponseSerializer,
+            status.HTTP_400_BAD_REQUEST: "Invalid request",
+            status.HTTP_401_UNAUTHORIZED: "Invalid credentials",
+        },
+        tags=["Auth"],
+    )
+    
     def post(self, request, *args, **kwargs):
         serializer = CustomAuthTokenSerializer(data=request.data)
 
@@ -172,11 +207,6 @@ class ManagerLoginView(LoginView):
     def get_success_url(self):
         return reverse('cars:enterprises_list')
 
-
-class VehicleService:
-    pass
-
-
 class VehicleManageView(LoginRequiredMixin, TemplateView):
     template_name = 'cars/manage_vehicles.html'
 
@@ -185,9 +215,9 @@ class VehicleManageView(LoginRequiredMixin, TemplateView):
         enterprise_id = kwargs.get('enterprise_id')
         enterprise = get_object_or_404(Enterprise, id=enterprise_id)
 
-        vehicles = enterprise.vehicles.all()
+        vehicles = enterprise.vehicles.order_by('-id')  # новые сверху [web:44]
 
-        paginator = Paginator(vehicles, 30)  # Пагинация: 30 записей на страницу
+        paginator = Paginator(vehicles, 30)
         page_number = self.request.GET.get('page')
         page_obj = paginator.get_page(page_number)
 
@@ -226,7 +256,22 @@ class VehicleEditView(UpdateView):
 class VehicleDeleteView(DeleteView):
     model = Vehicle
     template_name = 'cars/delete_vehicle.html'
-    success_url = reverse_lazy('cars:enterprises_list')
+
+    def get_success_url(self):
+        # сохраняем enterprise_id от удаляемого объекта для редиректа
+        return reverse_lazy('cars:manage_vehicles', kwargs={'enterprise_id': self.object.enterprise_id})
+
+    def delete(self, request, *args, **kwargs):
+        self.object = self.get_object()
+        enterprise_id = self.object.enterprise_id
+
+        try:
+            response = super().delete(request, *args, **kwargs)
+            messages.success(request, "Автомобиль удалён.")
+            return response
+        except Exception as e:
+            messages.error(request, f"Ошибка при удалении: {e}")
+            return redirect('cars:manage_vehicles', enterprise_id=enterprise_id)
 
 
 class TrackPointView(APIView):
@@ -250,6 +295,31 @@ class TrackPointView(APIView):
 class TripAPI(APIView):
     throttle_classes = [UserRateThrottle]
 
+    start_param = openapi.Parameter(
+        "start", openapi.IN_QUERY,
+        description="Начало периода (ISO 8601 datetime).",
+        type=openapi.TYPE_STRING, format=openapi.FORMAT_DATETIME,
+        required=True
+    )
+    end_param = openapi.Parameter(
+        "end", openapi.IN_QUERY,
+        description="Конец периода (ISO 8601 datetime).",
+        type=openapi.TYPE_STRING, format=openapi.FORMAT_DATETIME,
+        required=True
+    )
+
+    @swagger_auto_schema(
+        operation_summary="Трекпоинты за период",
+        operation_description="Возвращает список точек трека для автомобиля за период.",
+        manual_parameters=[start_param, end_param],
+        responses={
+            status.HTTP_200_OK: TrackPointSerializer(many=True),
+            status.HTTP_400_BAD_REQUEST: "Invalid params",
+            status.HTTP_404_NOT_FOUND: "Not found",
+        },
+        tags=["Trips"],
+    )
+    
     def get(self, request, vehicle_id):
         serializer = TripAPIRequestSerializer(data=request.query_params)
         serializer.is_valid(raise_exception=True)
@@ -390,6 +460,24 @@ def import_data(request):
 
     return HttpResponse("Используйте POST", status=405)
 
+report_type = openapi.Parameter("report_type", openapi.IN_QUERY, type=openapi.TYPE_STRING, required=True)
+vehicle_id = openapi.Parameter("vehicle_id", openapi.IN_QUERY, type=openapi.TYPE_INTEGER, required=False)
+driver_id = openapi.Parameter("driver_id", openapi.IN_QUERY, type=openapi.TYPE_INTEGER, required=False)
+enterprise_id = openapi.Parameter("enterprise_id", openapi.IN_QUERY, type=openapi.TYPE_INTEGER, required=False)
+start_date = openapi.Parameter("start_date", openapi.IN_QUERY, type=openapi.TYPE_STRING, format=openapi.FORMAT_DATE, required=False)
+end_date = openapi.Parameter("end_date", openapi.IN_QUERY, type=openapi.TYPE_STRING, format=openapi.FORMAT_DATE, required=False)
+period = openapi.Parameter("period", openapi.IN_QUERY, type=openapi.TYPE_STRING, required=False, description="day/week/month")
+
+@swagger_auto_schema(
+    method="get",
+    operation_summary="Сформировать отчёт",
+    manual_parameters=[report_type, vehicle_id, driver_id, enterprise_id, start_date, end_date, period],
+    responses={
+        status.HTTP_200_OK: openapi.Response(description="Отчёт (JSON)"),
+        status.HTTP_400_BAD_REQUEST: openapi.Response(description="Ошибка в параметрах"),
+    },
+    tags=["Reports"],
+)
 
 @api_view(['GET'])
 def report_api(request):
@@ -463,3 +551,29 @@ def upload_trip(request, vehicle_id):
     # GET запрос
     form = TripUploadForm()
     return render(request, 'cars/upload_trip.html', {'form': form, 'vehicle': vehicle})
+    
+@csrf_exempt
+def test_view(request):
+    return JsonResponse({"ok": True})
+    
+@csrf_exempt
+def test_async_post(request):
+    if request.method == "POST":
+        try:
+            data = json.loads(request.body or "{}")
+        except json.JSONDecodeError:
+            return JsonResponse({"error": "invalid JSON"}, status=400)
+
+        # Добавим немного тестовых данных
+        fake_data = {
+            "name": data.get("name", "Test Driver"),
+            "license_number": data.get("license_number", "FAKE123"),
+            "enterprise_id": data.get("enterprise_id", 1)
+        }
+
+        # Асинхронно отправляем задачу в Celery
+        save_driver_data.delay(fake_data)
+
+        return JsonResponse({"status": "accepted", "data": fake_data}, status=202)
+
+    return JsonResponse({"error": "method not allowed"}, status=405)

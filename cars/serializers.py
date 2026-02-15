@@ -69,7 +69,7 @@ class TrackPointSerializer(serializers.ModelSerializer):
 
     def get_local_date(self, obj):
         # Преобразуем время точки в локальное для удобства
-        enterprise = obj.vehicle.enterprise  # Получаем предприятие через связь
+        enterprise = obj.vehicle.enterprise
         local_time = enterprise.to_local_time(obj.timestamp)
         return local_time.isoformat()
 

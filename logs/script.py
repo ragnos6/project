@@ -17,7 +17,6 @@ with open(input_file, 'r') as f_in, open(output_file, 'w', newline='') as f_out:
         match = re.match(pattern, line)
         if match:
             try:
-                # Разбор параметров
                 params_str = match.group(11)
                 params = json.loads(params_str.replace("'", '"')) if params_str != "{}" else {}
  

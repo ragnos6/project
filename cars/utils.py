@@ -13,20 +13,18 @@ def convert_to_enterprise_timezone(vehicle):
     
 def get_address_for_point(point):
     """
-    Получить адрес через Яндекс Геокодер (geopy).
-    point.x - долгота, point.y - широта
+    Получить адрес через Яндекс Геокодер.
     """
     api_key = '38974648-aae9-4e6f-bdfb-9a64a05c5c91'
 
     # Создаём объект для геокодирования
     geolocator = Yandex(
         api_key=api_key,
-        user_agent="cars",  # Можно указать любое название
-        timeout=5,            # Таймаут для HTTP-запроса
+        user_agent="cars",
+        timeout=5,
     )
 
     try:
-        # Для обратного геокодирования geopy ожидает координаты в формате (широта, долгота)
         location = geolocator.reverse((point.y, point.x))
 
         if location and location.address:
@@ -39,8 +37,7 @@ def get_address_for_point(point):
 
 def haversine_distance(lat1, lon1, lat2, lon2):
     """
-    Calculate the great-circle distance (km) between two points on the Earth
-    specified by latitude/longitude.
+    Расчет расстояния между двумя точками
     """
     R = 6371  # Earth radius in kilometers
     from math import radians, sin, cos, sqrt, atan2
@@ -53,8 +50,7 @@ def haversine_distance(lat1, lon1, lat2, lon2):
 
 def generate_car_mileage_report(vehicle_id, start_date, end_date, period):
     """
-    Генерирует отчет о пробеге одного авто за период.
-    Возвращает объект CarMileageReport.
+    Отчет о пробеге одного авто за период.
     """
     vehicle = Vehicle.objects.get(pk=vehicle_id)
 
@@ -120,13 +116,10 @@ def generate_car_mileage_report(vehicle_id, start_date, end_date, period):
 
 def generate_driver_time_report(driver_id, start_date, end_date, period):
     """
-    Суммарная длительность (часов) поездок данного водителя за период,
-    сгруппированная по day/month/year.
+    Суммарная длительность поездок данного водителя за период,
     """
     driver = Driver.objects.get(pk=driver_id)
 
-    # Предположим, что Trip имеет поле driver=ForeignKey(Driver).
-    # Если у вас другая логика, подправьте.
     trips = Trip.objects.filter(
         vehicle__active_driver=driver,
         start_time__date__gte=start_date,
@@ -171,23 +164,7 @@ def generate_driver_time_report(driver_id, start_date, end_date, period):
     
 def generate_enterprise_active_cars_report(enterprise_id, start_date, end_date, period):
     """
-    Для заданного enterprise находим все авто, у которых active_driver != None.
-    Для каждого авто считаем пробег (через TrackPoint/Trip) с учётом period.
-
-    В итоге report.result = {
-      "cars": [
-        {
-          "car_id": 123,
-          "driver_name": "Иван Иванов",
-          "mileage_data": [
-            {"time": "2025-01-01", "value": 120.5},
-            {"time": "2025-01-02", "value": 80.1},
-            ...
-          ]
-        },
-        ...
-      ]
-    }
+    Для каждого авто считаем пробег с учётом period.
     """
     enterprise = Enterprise.objects.get(pk=enterprise_id)
 
@@ -203,9 +180,6 @@ def generate_enterprise_active_cars_report(enterprise_id, start_date, end_date, 
         driver = vehicle.active_driver
         driver_name = driver.name if driver else None
 
-        # Логика "пробег" (как в generate_car_mileage_report):
-
-        # Находим поездки:
         trips = Trip.objects.filter(
             vehicle=vehicle,
             start_time__date__gte=start_date,
@@ -250,7 +224,6 @@ def generate_enterprise_active_cars_report(enterprise_id, start_date, end_date, 
                 "value": round(grouped_data[tkey], 3)
             })
 
-        # Сохраняем результат для этого авто
         if mileage_data:
             cars_result.append({
                 "car_id": vehicle.id,
@@ -258,7 +231,6 @@ def generate_enterprise_active_cars_report(enterprise_id, start_date, end_date, 
                 "mileage_data": mileage_data
             })
 
-    # 2) Собираем final JSON:
     final_result = {
         "cars": cars_result,
         "info": {
@@ -269,7 +241,6 @@ def generate_enterprise_active_cars_report(enterprise_id, start_date, end_date, 
         }
     }
 
-    # 3) Создаём запись EnterpriseActiveCarsReport
     report = EnterpriseActiveCarsReport.objects.create(
         name="Активные авто + пробег",
         start_date=start_date,

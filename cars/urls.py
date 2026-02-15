@@ -6,7 +6,6 @@ from drf_yasg import openapi
 from rest_framework import permissions
 
 
-
 router = DefaultRouter()
 router.register(r'enterprises', EnterpriseViewSet, basename='enterprise')
 router.register(r'vehicles', VehicleViewSet, basename='vehicle')
@@ -57,6 +56,3 @@ urlpatterns = [
 
 
 ]
-
-# Token:43f9553733f75df08073d9acad8fdc34b6735497
-# Token github pts2Zrzky2UViAcyOBm8hQ1GlQqHBXhU9flY9zgzeps

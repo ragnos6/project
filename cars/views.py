@@ -84,8 +84,7 @@ from .utils import (
 )
 
 
-
-@method_decorator(cache_page(30), name='list')  # кэшируем список на 30 секунд
+@method_decorator(cache_page(30), name='list')
 class EnterpriseViewSet(viewsets.ReadOnlyModelViewSet):
     serializer_class = EnterpriseSerializer
     permission_classes = [IsManagerOrReadOnly]
@@ -116,8 +115,8 @@ class EnterpriseListView(ListView):
         return context
 
 
-@method_decorator(cache_page(20), name='list')  # кэш списка машин
-class VehicleViewSet(viewsets.ReadOnlyModelViewSet):  # если не редактируется — ReadOnly
+@method_decorator(cache_page(20), name='list')
+class VehicleViewSet(viewsets.ReadOnlyModelViewSet):
     serializer_class = VehicleSerializer
     permission_classes = [IsManagerOrReadOnly]
     pagination_class = CustomVehiclePagination
@@ -258,7 +257,6 @@ class VehicleDeleteView(DeleteView):
     template_name = 'cars/delete_vehicle.html'
 
     def get_success_url(self):
-        # сохраняем enterprise_id от удаляемого объекта для редиректа
         return reverse_lazy('cars:manage_vehicles', kwargs={'enterprise_id': self.object.enterprise_id})
 
     def delete(self, request, *args, **kwargs):
@@ -332,12 +330,10 @@ class TripAPI(APIView):
             return Response(cached_data, status=status.HTTP_200_OK)
 
         try:
-            # получаем трекпоинты через сервис
             track_points = TripAPIService.get_trips_track_points(vehicle_id, start_date, end_date)
             serializer_tp = TrackPointSerializer(track_points, many=True)
             data = serializer_tp.data
 
-            # кэшируем результат на 60 секунд
             cache.set(cache_key, data, timeout=60)
 
             return Response(data, status=status.HTTP_200_OK)
@@ -347,7 +343,6 @@ class TripAPI(APIView):
         except ValidationError as e:
             return Response({"error": str(e)}, status=status.HTTP_400_BAD_REQUEST)
         except Exception as e:
-            # вывод в консоль для отладки
             print("🚨 TripAPI internal error:", e)
             return Response({"error": "Internal server error"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
@@ -400,7 +395,6 @@ class VehicleDetailView(DetailView):
         try:
             context.update(VehicleDetailService.get_context(dto))
         except Exception as e:
-            # В случае ошибки просто используем контекст по умолчанию
             context['start_value'] = (timezone.now() - timedelta(days=30)).strftime('%Y-%m-%dT%H:%M')
             context['end_value'] = timezone.now().strftime('%Y-%m-%dT%H:%M')
             context['trip_list'] = []
@@ -503,7 +497,6 @@ def reports_list(request):
         form = ReportForm(request.POST)
         if form.is_valid():
             try:
-                # Используем сервис для создания отчета
                 report = ReportFormService.create_report(form.cleaned_data)
                 messages.success(request, f"Отчёт '{report.name}' успешно создан.")
                 return redirect('cars:reports_list')
@@ -564,14 +557,12 @@ def test_async_post(request):
         except json.JSONDecodeError:
             return JsonResponse({"error": "invalid JSON"}, status=400)
 
-        # Добавим немного тестовых данных
         fake_data = {
             "name": data.get("name", "Test Driver"),
             "license_number": data.get("license_number", "FAKE123"),
             "enterprise_id": data.get("enterprise_id", 1)
         }
 
-        # Асинхронно отправляем задачу в Celery
         save_driver_data.delay(fake_data)
 
         return JsonResponse({"status": "accepted", "data": fake_data}, status=202)

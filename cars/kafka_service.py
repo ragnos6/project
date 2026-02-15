@@ -50,7 +50,6 @@ class KafkaService:
                 callback=self._delivery_report
             )
             
-            # Асинхронная отправка - не блокируем основной поток
             self.producer.poll(0)
             return True
             
@@ -70,5 +69,4 @@ class KafkaService:
         if self.producer:
             self.producer.flush()
 
-# Глобальный экземпляр сервиса
 kafka_service = KafkaService()

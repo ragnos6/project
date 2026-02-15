@@ -1,20 +1,3 @@
-"""
-Телеграм-бот с интегрированным Kafka-консьюмером для уведомлений о CRUD-операциях с автомобилями.
-
-Требования:
-- python 3.9+
-- pip install python-telegram-bot aiohttp aiokafka python-dotenv
-
-Переменные окружения (обычно в .env):
-- TELEGRAM_BOT_TOKEN - токен бота
-- DJANGO_API_URL - базовый URL вашего Django API (по умолчанию http://localhost:8080/report-api/)
-- AUTH_FILE - файл с базовой авторизацией менеджера (по умолчанию manager_auth.json)
-- KAFKA_BOOTSTRAP_SERVERS - адрес Kafka bootstrap, например localhost:9092
-- KAFKA_TOPIC - topic для событий (по умолчанию vehicle.events)
-
-Файл объединяет команды бота (login, отчёты) и фоновую задачу, слушающую Kafka и рассылающую уведомления менеджерам.
-"""
-
 import os
 import json
 import base64
@@ -49,15 +32,13 @@ MANAGER_FILE = os.path.join(os.path.dirname(__file__), AUTH_FILE)
 
 MONTHS_RU = ["Янв", "Фев", "Мар", "Апр", "Май", "Июн", "Июл", "Авг", "Сен", "Окт", "Ноя", "Дек"]
 
-# ---------------------- Утилиты авторизации ----------------------
+# Авторизация
 
 def get_auth_header():
-    """Возвращает заголовок Authorization с basic-auth, если файл с учётными данными существует."""
     if os.path.exists(AUTH_FILE):
         try:
             with open(AUTH_FILE, 'r') as f:
                 creds = json.load(f)
-                # Если это список, берем первого менеджера (для API запросов)
                 if isinstance(creds, list) and len(creds) > 0:
                     creds = creds[0]
                 auth_str = f"{creds['username']}:{creds['password']}"
@@ -66,7 +47,7 @@ def get_auth_header():
             logger.exception('Не удалось прочитать AUTH_FILE: %s', e)
     return {}
 
-# ---------------------- Форматирование и запросы отчётов ----------------------
+# Форматирование и запросы отчётов
 
 def format_date(date_str: str) -> str:
     try:
@@ -90,13 +71,11 @@ async def fetch_report(params: dict) -> dict:
             logger.exception('Ошибка при запросе отчёта: %s', e)
             return {"error": "Ошибка запроса к API"}
 
-# ---------------------- Команды бота (login, start, отчёты) ----------------------
+# Команды
 
 async def login(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """
-    Логин менеджера с привязкой к предприятию и chat_id.
-    Использование:
-    /login <логин> <пароль> <enterprise_id>
+    Логин менеджера
     """
     if len(context.args) < 3:
         await update.message.reply_text(
@@ -270,7 +249,7 @@ async def error_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except Exception:
         logger.exception('Не удалось отправить сообщение об ошибке')
 
-# ---------------------- Kafka: получение менеджеров и обработка сообщений ----------------------
+# Kafka
 
 async def fetch_managers_for_enterprise(enterprise_id):
     """
@@ -377,7 +356,7 @@ async def kafka_consumer_task(app):
 
             await consumer.start()
             logger.info('Kafka consumer started, topic=%s, bootstrap=%s', KAFKA_TOPIC, KAFKA_BOOTSTRAP)
-            retry_count = 0  # Сброс счетчика при успешном подключении
+            retry_count = 0
             
             async for msg in consumer:
                 try:
@@ -413,7 +392,7 @@ async def kafka_consumer_task(app):
                 except Exception:
                     logger.exception('Ошибка при остановке Kafka consumer')
 
-# ---------------------- Main: регистрация команд и запуск ----------------------
+# Регистрация команд и запуск
 
 def build_app():
     if not TOKEN:
@@ -443,15 +422,12 @@ def main():
 
     app = build_app()
     
-    # Создаем и запускаем Kafka consumer в фоне
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
     
-    # Запускаем Kafka consumer в отдельной задаче
     kafka_task = loop.create_task(kafka_consumer_task(app))
     
     try:
-        # Запускаем бота в основном потоке
         logger.info("Запуск бота...")
         app.run_polling()
     except KeyboardInterrupt:
@@ -459,10 +435,9 @@ def main():
     except Exception as e:
         logger.exception("Критическая ошибка: %s", e)
     finally:
-        # Отменяем Kafka task при завершении
         if not kafka_task.done():
             kafka_task.cancel()
-        loop.run_until_complete(asyncio.sleep(1))  # Даем время на завершение
+        loop.run_until_complete(asyncio.sleep(1))
         loop.close()
 
 if __name__ == "__main__":

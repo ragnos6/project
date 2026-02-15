@@ -13,29 +13,23 @@ class EnterpriseResource(resources.ModelResource):
     """
     class Meta:
         model = Enterprise
-        # Поля, которые будут участвовать в импорте/экспорте
         fields = (
             'id',
             'name',
             'city',
             'timezone',
         )
-        export_order = fields  # порядок столбцов при экспорте
+        export_order = fields
 
 
 class VehicleResource(resources.ModelResource):
     """
     Ресурс для импорта/экспорта автомобилей.
-    По умолчанию поля ForeignKey (model, documentation, enterprise, active_driver) 
-    будут представлены их ID.
-    Если нужно подгружать/импортировать строки (например, название модели), 
-    используйте ForeignKeyWidget.
     """
     drivers_list = fields.Field(
         column_name='drivers',
-        attribute='drivers',  # ссылка на ManyToMany
+        attribute='drivers',
         widget=ManyToManyWidget(Driver, field='id')
-        # здесь указываем, что храним список driver.id через запятую
     )
 
     class Meta:
@@ -58,7 +52,7 @@ class VehicleResource(resources.ModelResource):
         export_order = fields
         
 class TripResource(resources.ModelResource):
-    start_address = fields.Field()  # виртуальное поле
+    start_address = fields.Field()
     end_address = fields.Field()
 
     class Meta:
@@ -67,7 +61,6 @@ class TripResource(resources.ModelResource):
                   'start_address', 'end_address')
 
     def dehydrate_start_address(self, trip):
-        # находим первую точку за время trip.start_time
         track_point = trip.vehicle.track_points.filter(
             timestamp__gte=trip.start_time,
             timestamp__lte=trip.end_time
@@ -91,7 +84,7 @@ class TrackPointResource(resources.ModelResource):
 
     class Meta:
         model = TrackPoint
-        fields = ('id', 'vehicle', 'timestamp')  # без location, мы сами обработаем
+        fields = ('id', 'vehicle', 'timestamp')
 
     def dehydrate_lat(self, obj):
         # lat = y
@@ -102,8 +95,6 @@ class TrackPointResource(resources.ModelResource):
         return obj.location.x if obj.location else None
 
     def before_save_instance(self, instance, using_transactions, dry_run):
-        # При импорте смотрим, есть ли lat/lon в row
-        # (Нужно либо before_import_row, либо widget на lat/lon)
         row = self.current_row  # строка CSV
         lat_val = row.get('lat')
         lon_val = row.get('lon')

@@ -69,7 +69,7 @@ class TrackService:
                 ]
             }
         else:
-            # Формирование обычного JSON
+            # Формирование JSON
             track_data = [
                 {
                     "location": track.location.coords,
@@ -307,10 +307,8 @@ class TripUploadService:
         # Создание поездки
         try:
             with transaction.atomic():
-                # Блокируем строку vehicle, чтобы избежать race при одновременных загрузках
                 vehicle_locked = Vehicle.objects.select_for_update().get(id=vehicle.id)
 
-                # Повторная проверка конфликта поездок под блокировкой
                 if vehicle_locked.trips.filter(start_time__lt=dto.end_time, end_time__gt=dto.start_time).exists():
                     raise ValidationError("Новая поездка конфликтует с существующей.")
 
@@ -322,7 +320,7 @@ class TripUploadService:
                     gpx_file=dto.gpx_file,
                 )
 
-                # Создание точек трека (bulk_create) — в той же транзакции
+                # Создание точек трека
                 if track_points_list:
                     track_points_objects = [
                         TrackPoint(
@@ -337,7 +335,6 @@ class TripUploadService:
                 return trip
 
         except IntegrityError as e:
-            # транзакция откатится автоматически; пробрасываем читаемую ошибку
             raise ValidationError(f"Ошибка при сохранении поездки: {e}")
 
 class TripAPIService:
@@ -524,7 +521,6 @@ class VehicleService:
     @staticmethod
     @transaction.atomic
     def create_vehicle(form_data, enterprise):
-        # 1) Создаём без ManyToMany и без active_driver (он зависит от drivers)
         vehicle = Vehicle(
             cost=form_data["cost"],
             year_of_production=form_data["year_of_production"],
@@ -539,17 +535,13 @@ class VehicleService:
             purchase_date=form_data.get("purchase_date", now()),
         )
 
-        # Важно: Django не запускает полную валидацию модели автоматически при save(),
-        # поэтому full_clean вызывается вручную. [web:26]
         vehicle.full_clean()
         vehicle.save()
 
-        # 2) Проставляем ManyToMany drivers (можно только после save) [web:22]
         drivers = form_data.get("drivers")
         if drivers is not None:
             vehicle.drivers.set(drivers)
 
-        # 3) Теперь можно назначить active_driver и провалидировать ваш clean()
         active_driver = form_data.get("active_driver")
         if active_driver is not None:
             vehicle.active_driver = active_driver

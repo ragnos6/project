@@ -21,5 +21,4 @@ def send_vehicle_event(action: str, payload: dict):
         'payload': payload
     }
     producer.send(settings.KAFKA_VEHICLE_TOPIC, value=event)
-    # для учебного проекта можно явно flush, в продакшн это не обязательно
     producer.flush()
